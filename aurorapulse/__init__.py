@@ -1,0 +1,2 @@
+"""AuroraPulse local agent project."""
+
