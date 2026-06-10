@@ -2,9 +2,8 @@ use std::env;
 use std::io::{self, Write};
 use std::path::Path;
 
+use crate::app::{App, OllamaChatClient, TurnOutcome};
 use crate::config::AppConfig;
-use crate::ollama;
-use crate::session::Session;
 
 const APP_NAME: &str = "A U R O R A";
 const APP_TAGLINE: &str = "local-first assistant shell";
@@ -49,7 +48,7 @@ fn render_banner(workspace: &Path, model: &str) -> io::Result<()> {
 fn repl_loop(config: &AppConfig) -> Result<(), String> {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
-    let mut session = Session::new();
+    let mut app = App::new(config.clone(), OllamaChatClient);
 
     loop {
         write!(stdout, "{ACCENT}> {RESET}").map_err(|err| err.to_string())?;
@@ -61,28 +60,24 @@ fn repl_loop(config: &AppConfig) -> Result<(), String> {
             .map_err(|err| format!("failed to read input from terminal: {err}"))?;
         let trimmed = input.trim();
 
-        if trimmed.is_empty() {
-            continue;
+        let should_show_thinking =
+            !trimmed.is_empty() && !matches!(trimmed, "quit" | "exit" | "/clear");
+        if should_show_thinking {
+            println!("助手> 正在思考...");
         }
 
-        if matches!(trimmed, "quit" | "exit") {
-            println!("助手> 下次见。");
-            break;
-        }
-
-        if trimmed == "/clear" {
-            session.clear();
-            println!("助手> 已清空当前会话。");
-            continue;
-        }
-
-        println!("助手> 正在思考...");
-        match ollama::chat(&config.ollama_url, &config.model, session.history(), trimmed) {
-            Ok(reply) => {
-                session.push_turn(trimmed, &reply);
-                println!("助手> {reply}");
+        match app.handle_text(trimmed) {
+            Ok(TurnOutcome::Ignored) => continue,
+            Ok(TurnOutcome::Exit(message)) => {
+                println!("{message}");
+                break;
             }
-            Err(err) => println!("助手> 执行失败：{err}"),
+            Ok(TurnOutcome::Cleared(message)) | Ok(TurnOutcome::Reply(message)) => {
+                println!("{message}");
+            }
+            Err(err) => {
+                println!("助手> 执行失败：{err}");
+            }
         }
     }
 

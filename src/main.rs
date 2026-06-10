@@ -1,9 +1,6 @@
-mod cli;
-mod config;
-mod ollama;
-mod session;
-
-fn main() -> Result<(), String> {
-    let config = config::load_config(std::env::args().nth(1))?;
-    cli::run(&config)
+fn main() {
+    if let Err(err) = aurora::run(std::env::args().nth(1)) {
+        eprintln!("错误：{err}");
+        std::process::exit(1);
+    }
 }

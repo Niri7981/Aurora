@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 pub const DEFAULT_MODEL: &str = "gemma4:e4b";
 pub const DEFAULT_OLLAMA_URL: &str = "http://127.0.0.1:11434";
 
+#[derive(Clone)]
 pub struct AppConfig {
     pub workspace: PathBuf,
     pub model: String,
