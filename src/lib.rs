@@ -2,6 +2,7 @@ pub mod app;
 pub mod cli;
 pub mod config;
 pub mod ollama;
+pub mod planner;
 pub mod session;
 
 pub fn run(workspace_arg: Option<String>) -> Result<(), String> {
