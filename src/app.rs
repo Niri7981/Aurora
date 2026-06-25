@@ -1,5 +1,7 @@
 use crate::config::AppConfig;
-use crate::session::{ChatMessage, Session};
+use crate::harness::Harness;
+use crate::planner::PlannerDecision;
+use crate::session::ChatMessage;
 
 pub trait ChatClient {
     fn chat(
@@ -35,7 +37,7 @@ pub enum TurnOutcome {
 
 pub struct App<C> {
     config: AppConfig,
-    session: Session,
+    harness: Harness,
     client: C,
 }
 
@@ -43,7 +45,7 @@ impl<C: ChatClient> App<C> {
     pub fn new(config: AppConfig, client: C) -> Self {
         Self {
             config,
-            session: Session::new(),
+            harness: Harness::new(),
             client,
         }
     }
@@ -60,18 +62,18 @@ impl<C: ChatClient> App<C> {
         }
 
         if trimmed == "/clear" {
-            self.session.clear();
+            self.harness.clear_session();
             return Ok(TurnOutcome::Cleared("助手> 已清空当前会话。".to_string()));
         }
 
-        let reply = self.client.chat(
+        let planner_json = self.client.chat(
             &self.config.ollama_url,
             &self.config.model,
-            self.session.history(),
+            self.harness.history(),
             trimmed,
         )?;
-        self.session.push_turn(trimmed, &reply);
+        let decision = PlannerDecision::parse(&planner_json)?;
 
-        Ok(TurnOutcome::Reply(format!("助手> {reply}")))
+        self.harness.handle_decision(trimmed, decision)
     }
 }
