@@ -1,4 +1,5 @@
 use crate::config::AppConfig;
+use crate::context;
 use crate::harness::Harness;
 use crate::planner::PlannerDecision;
 use crate::session::ChatMessage;
@@ -66,11 +67,26 @@ impl<C: ChatClient> App<C> {
             return Ok(TurnOutcome::Cleared("助手> 已清空当前会话。".to_string()));
         }
 
+        if matches!(trimmed, "/context" | "/context preview") {
+            let local_context = context::load(&self.config)?;
+            return Ok(TurnOutcome::Reply(format!(
+                "助手>\n{}",
+                local_context.render_preview("ollama")
+            )));
+        }
+
+        if trimmed == "/context init" {
+            let report = context::init_files(&self.config)?;
+            return Ok(TurnOutcome::Reply(format!("助手>\n{}", report.render())));
+        }
+
+        let local_context = context::load(&self.config)?;
+        let model_user_text = context::compose_user_prompt(&local_context, "ollama", trimmed);
         let planner_json = self.client.chat(
             &self.config.ollama_url,
             &self.config.model,
             self.harness.history(),
-            trimmed,
+            &model_user_text,
         )?;
         let decision = PlannerDecision::parse(&planner_json)?;
 

@@ -10,6 +10,11 @@ pub struct AppConfig {
     pub workspace: PathBuf,
     pub model: String,
     pub ollama_url: String,
+    pub aurora_home: PathBuf,
+    pub identity_card_path: PathBuf,
+    pub current_focus_path: PathBuf,
+    pub preferences_path: PathBuf,
+    pub privacy_rules_path: PathBuf,
 }
 
 pub fn load_config(workspace_arg: Option<String>) -> Result<AppConfig, String> {
@@ -26,12 +31,44 @@ pub fn load_config(workspace_arg: Option<String>) -> Result<AppConfig, String> {
 
     let model = env::var("OLLAMA_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
     let ollama_url = env::var("OLLAMA_URL").unwrap_or_else(|_| DEFAULT_OLLAMA_URL.to_string());
+    let aurora_home = resolve_aurora_home()?;
+    let identity_card_path =
+        env_path_or_default("AURORA_IDENTITY_CARD", "identity-card.md", &aurora_home);
+    let current_focus_path =
+        env_path_or_default("AURORA_CURRENT_FOCUS", "current-focus.md", &aurora_home);
+    let preferences_path =
+        env_path_or_default("AURORA_PREFERENCES", "preferences.json", &aurora_home);
+    let privacy_rules_path =
+        env_path_or_default("AURORA_PRIVACY_RULES", "privacy-rules.json", &aurora_home);
 
     Ok(AppConfig {
         workspace,
         model,
         ollama_url,
+        aurora_home,
+        identity_card_path,
+        current_focus_path,
+        preferences_path,
+        privacy_rules_path,
     })
+}
+
+fn resolve_aurora_home() -> Result<PathBuf, String> {
+    if let Ok(raw) = env::var("AURORA_HOME") {
+        return Ok(PathBuf::from(raw));
+    }
+
+    let home = env::var("HOME").map_err(|_| {
+        "HOME is not set; set AURORA_HOME to choose where AuroraPulse stores local identity context"
+            .to_string()
+    })?;
+    Ok(PathBuf::from(home).join(".aurorapulse"))
+}
+
+fn env_path_or_default(env_key: &str, filename: &str, aurora_home: &Path) -> PathBuf {
+    env::var(env_key)
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| aurora_home.join(filename))
 }
 
 fn resolve_workspace(input: &Path) -> Result<PathBuf, String> {

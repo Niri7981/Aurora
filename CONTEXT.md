@@ -1,6 +1,6 @@
 # AuroraPulse
 
-AuroraPulse is a local-first personal assistant context centered on helping one user get small daily tasks done on their own machine. It exists to turn natural-language requests into dependable assistance grounded in local context and explicit tools.
+AuroraPulse is a local-first personal assistant context centered on helping one user get useful help from any model without repeatedly reintroducing themself. It exists to give local models and API-backed models a user-owned identity context, then turn natural-language requests into dependable assistance grounded in local context and explicit tools.
 
 ## Language
 
@@ -15,6 +15,22 @@ _Avoid_: General productivity suite, web automation platform, everything assista
 **Local-First**:
 AuroraPulse prefers a local model as its primary intelligence layer and stores its own user data locally by default. External services may still be used for specific capabilities, but the assistant's control loop and core user context should remain anchored on the user's machine.
 _Avoid_: Cloud-first, fully offline, remote-first
+
+**Identity Card**:
+The first durable personal context object in AuroraPulse. It is a short, user-editable local file that tells a model who the user is, what they are currently focused on, how they prefer assistance, and which privacy boundaries matter. It should be injected before the first model reply when useful, whether the provider is local or API-backed.
+_Avoid_: Hidden profile, inferred personality model, account-owned memory
+
+**Account-Like Memory Experience**:
+The V1 product promise that users of local models or stateless API calls can still get a first-message experience where the model knows who they are. AuroraPulse provides this by owning the identity card locally and sending only a minimal context bundle to the selected model.
+_Avoid_: Platform account memory, provider-owned personalization, automatic cloud profile
+
+**Provider-Agnostic Context**:
+AuroraPulse should prepare personal and project context before choosing or calling a model provider. The same local context layer should work with Ollama, OpenAI API, Anthropic API, Gemini API, or future providers, with provider-specific privacy rules deciding what can be sent.
+_Avoid_: Provider-locked memory, model-specific profile format, cloud-first personalization
+
+**Context Bundle**:
+A small, auditable package of local context assembled for one request or one external assistant. It may include identity card fields, current focus, project context, selected preferences, and source notes, but it should exclude private data that is not needed for the task or is blocked by privacy rules.
+_Avoid_: Full memory dump, whole-vault prompt, invisible context injection
 
 **Local User Data**:
 The assistant-owned data that should live on the user's computer by default, such as session history, preferences, notes, reminders, and indexed local knowledge. This does not include external service state that AuroraPulse may read or act on through an integration.
@@ -125,7 +141,7 @@ AuroraPulse should begin with one strong default personality and only a small am
 _Avoid_: Persona catalog, many character modes, fully dynamic identity switching
 
 **Wake-to-Voice Success Loop**:
-An early AuroraPulse interaction is successful when the user can invoke it with a global shortcut, speak a request, receive a short spoken reply, and have the requested task complete correctly. This is the core end-to-end loop the first stage must make dependable.
+In the voice stage, an AuroraPulse interaction is successful when the user can invoke it with a global shortcut, speak a request, receive a short spoken reply, and have the requested task complete correctly. This remains a core later loop, but it no longer displaces the V1 identity-card loop.
 _Avoid_: Text-only success criteria, partial demo success, wake without completion
 
 **Observed Task Completion**:
@@ -137,11 +153,11 @@ When the model's expectation conflicts with the observed tool result, AuroraPuls
 _Avoid_: Model-over-reality, hallucinated success, reasoning-over-observation
 
 **Short Spoken Reply Loop**:
-In the first stage, AuroraPulse should use brief TTS responses as part of the wake-to-voice interaction loop rather than trying to sustain long spoken conversations. Spoken output is there to confirm, clarify, or lightly guide the next turn.
+In the voice stage, AuroraPulse should use brief TTS responses as part of the wake-to-voice interaction loop rather than trying to sustain long spoken conversations. Spoken output is there to confirm, clarify, or lightly guide the next turn.
 _Avoid_: Long-form voice chat, extended spoken dialogue, narrated assistant sessions
 
 **Music-First Voice Loop**:
-The first fully dependable wake-to-voice workflow should be music control, because it is easy to verify, feels immediately useful, and exercises the core assistant loop well. Music is the first proving ground for voice interaction, not the final definition of the product.
+The first fully dependable wake-to-voice workflow can be music control, because it is easy to verify, feels immediately useful, and exercises the assistant loop well. Music is the first proving ground for voice interaction, not the V1 product identity.
 _Avoid_: Tool-order sprawl, notes-first voice demo, music-as-product-identity
 
 **Contextual Short Explanation**:

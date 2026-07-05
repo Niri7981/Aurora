@@ -90,3 +90,35 @@ fn rejects_blank_required_text_fields() {
 
     assert!(err.contains("reply"), "unexpected error: {err}");
 }
+
+#[test]
+fn parses_json_embedded_in_model_chatter() {
+    let decision = PlannerDecision::parse(
+        r#"好的，我会用 JSON：
+```json
+{"mode":"chat","reply":"你是 AuroraPulse 的构建者。"}
+```
+"#,
+    )
+    .expect("embedded planner decision should parse");
+
+    assert_eq!(
+        decision,
+        PlannerDecision::Chat {
+            reply: "你是 AuroraPulse 的构建者。".to_string()
+        }
+    );
+}
+
+#[test]
+fn treats_plain_model_text_as_chat_reply() {
+    let decision = PlannerDecision::parse("你是 AuroraPulse 的 owner/builder，最近在做 Phase 1。")
+        .expect("plain text should become a chat reply");
+
+    assert_eq!(
+        decision,
+        PlannerDecision::Chat {
+            reply: "你是 AuroraPulse 的 owner/builder，最近在做 Phase 1。".to_string()
+        }
+    );
+}

@@ -1,0 +1,17 @@
+{
+  "default_provider_policy": {
+    "local": "identity card and current focus may be used by default",
+    "cloud": "send only the shortest necessary identity context"
+  },
+  "blocked_without_confirmation": [
+    "secrets",
+    "credentials",
+    "financial records",
+    "private journal entries",
+    "local-only lines"
+  ],
+  "redaction_markers": [
+    "private:",
+    "local-only:"
+  ]
+}

@@ -10,8 +10,14 @@ pub enum PlannerDecision {
 
 impl PlannerDecision {
     pub fn parse(raw_json: &str) -> Result<Self, String> {
-        let value: Value = serde_json::from_str(raw_json)
-            .map_err(|err| format!("planner JSON 无法解析：{err}"))?;
+        let value = match parse_planner_value(raw_json)? {
+            Some(value) => value,
+            None => {
+                return Ok(Self::Chat {
+                    reply: raw_json.trim().to_string(),
+                });
+            }
+        };
         let mode = value
             .get("mode")
             .and_then(Value::as_str)
@@ -63,6 +69,69 @@ impl PlannerDecision {
             other => Err(format!("未知 planner mode：{other}")),
         }
     }
+}
+
+fn parse_planner_value(raw_json: &str) -> Result<Option<Value>, String> {
+    let trimmed = raw_json.trim();
+    if trimmed.is_empty() {
+        return Err("planner 输出为空".to_string());
+    }
+
+    if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
+        return Ok(Some(value));
+    }
+
+    if let Some(candidate) = extract_json_object(trimmed) {
+        let value = serde_json::from_str::<Value>(&candidate)
+            .map_err(|err| format!("planner JSON 无法解析：{err}"))?;
+        return Ok(Some(value));
+    }
+
+    Ok(None)
+}
+
+fn extract_json_object(text: &str) -> Option<String> {
+    for (start, _) in text.match_indices('{') {
+        let candidate = &text[start..];
+        if let Some(end) = find_json_object_end(candidate) {
+            return Some(candidate[..=end].to_string());
+        }
+    }
+
+    None
+}
+
+fn find_json_object_end(text: &str) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+
+    for (index, ch) in text.char_indices() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+
+        match ch {
+            '"' => in_string = true,
+            '{' => depth += 1,
+            '}' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(index);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    None
 }
 
 fn required_text<'a>(

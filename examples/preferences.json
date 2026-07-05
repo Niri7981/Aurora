@@ -1,0 +1,19 @@
+{
+  "communication": {
+    "default_language": "zh-CN",
+    "style": "concise, practical, product-minded"
+  },
+  "engineering": {
+    "prefer": [
+      "local-first architecture",
+      "small inspectable modules",
+      "explicit context boundaries",
+      "tests for behavior that protects privacy"
+    ],
+    "avoid": [
+      "cloud-owned memory",
+      "unbounded autonomous agents",
+      "silent broad file access"
+    ]
+  }
+}
