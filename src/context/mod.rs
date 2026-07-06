@@ -6,10 +6,10 @@ use serde_json::Value;
 use crate::config::AppConfig;
 
 const PROJECT_CONTEXT_FILES: [&str; 3] = ["CONTEXT.md", "AGENTS.md", "CLAUDE.md"];
-const IDENTITY_CARD_TEMPLATE: &str = include_str!("../examples/identity-card.md");
-const CURRENT_FOCUS_TEMPLATE: &str = include_str!("../examples/current-focus.md");
-const PREFERENCES_TEMPLATE: &str = include_str!("../examples/preferences.json");
-const PRIVACY_RULES_TEMPLATE: &str = include_str!("../examples/privacy-rules.json");
+const IDENTITY_CARD_TEMPLATE: &str = include_str!("../../examples/identity-card.md");
+const CURRENT_FOCUS_TEMPLATE: &str = include_str!("../../examples/current-focus.md");
+const PREFERENCES_TEMPLATE: &str = include_str!("../../examples/preferences.json");
+const PRIVACY_RULES_TEMPLATE: &str = include_str!("../../examples/privacy-rules.json");
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextDocument {
@@ -109,23 +109,23 @@ impl LocalContext {
     }
 
     pub fn render_preview(&self, provider: &str) -> String {
+        let provider_kind = ProviderKind::from_name(provider);
         let mut output = String::from("Context preview\n");
         output.push_str(&format!("Provider: {provider}\n"));
-        output.push_str(&format!(
-            "Policy: {:?}\n\n",
-            ProviderKind::from_name(provider)
-        ));
+        output.push_str(&format!("Policy: {:?}\n\n", provider_kind));
 
-        render_document(&mut output, &self.identity_card);
-        render_document(&mut output, &self.current_focus);
-        render_document(&mut output, &self.preferences);
-        render_document(&mut output, &self.privacy_rules);
+        render_document(&mut output, &self.identity_card, provider_kind);
+        render_document(&mut output, &self.current_focus, provider_kind);
+        render_document(&mut output, &self.preferences, provider_kind);
+        if provider_kind == ProviderKind::Local {
+            render_document(&mut output, &self.privacy_rules, provider_kind);
+        }
 
         if self.project_contexts.is_empty() {
             output.push_str("Project Context: not found\n\n");
         } else {
             for document in &self.project_contexts {
-                render_document(&mut output, &Some(document.clone()));
+                render_document(&mut output, &Some(document.clone()), provider_kind);
             }
         }
 
@@ -278,14 +278,18 @@ fn validate_json(label: &str, document: &ContextDocument) -> Result<(), String> 
     Ok(())
 }
 
-fn render_document(output: &mut String, document: &Option<ContextDocument>) {
+fn render_document(
+    output: &mut String,
+    document: &Option<ContextDocument>,
+    provider_kind: ProviderKind,
+) {
     if let Some(document) = document {
         output.push_str(&format!(
             "{}: {}\n",
             document.label,
             document.path.display()
         ));
-        output.push_str(&document.content);
+        output.push_str(&redact_for_provider(&document.content, provider_kind));
         output.push_str("\n\n");
     }
 }
