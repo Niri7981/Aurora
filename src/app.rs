@@ -1,32 +1,8 @@
 use crate::config::AppConfig;
 use crate::context;
 use crate::harness::Harness;
+use crate::model_provider::ChatClient;
 use crate::planner::PlannerDecision;
-use crate::session::ChatMessage;
-
-pub trait ChatClient {
-    fn chat(
-        &mut self,
-        ollama_url: &str,
-        model: &str,
-        history: &[ChatMessage],
-        user_text: &str,
-    ) -> Result<String, String>;
-}
-
-pub struct OllamaChatClient;
-
-impl ChatClient for OllamaChatClient {
-    fn chat(
-        &mut self,
-        ollama_url: &str,
-        model: &str,
-        history: &[ChatMessage],
-        user_text: &str,
-    ) -> Result<String, String> {
-        crate::ollama::chat(ollama_url, model, history, user_text)
-    }
-}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum TurnOutcome {
@@ -67,11 +43,16 @@ impl<C: ChatClient> App<C> {
             return Ok(TurnOutcome::Cleared("助手> 已清空当前会话。".to_string()));
         }
 
-        if matches!(trimmed, "/context" | "/context preview") {
+        if trimmed == "/context" || trimmed.starts_with("/context preview") {
             let local_context = context::load(&self.config)?;
+            let preview_provider = trimmed
+                .strip_prefix("/context preview")
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| self.client.provider_name(&self.config));
             return Ok(TurnOutcome::Reply(format!(
                 "助手>\n{}",
-                local_context.render_preview("ollama")
+                local_context.render_preview(preview_provider)
             )));
         }
 
@@ -81,13 +62,11 @@ impl<C: ChatClient> App<C> {
         }
 
         let local_context = context::load(&self.config)?;
-        let model_user_text = context::compose_user_prompt(&local_context, "ollama", trimmed);
-        let planner_json = self.client.chat(
-            &self.config.ollama_url,
-            &self.config.model,
-            self.harness.history(),
-            &model_user_text,
-        )?;
+        let provider = self.client.provider_name(&self.config);
+        let model_user_text = context::compose_user_prompt(&local_context, provider, trimmed);
+        let planner_json =
+            self.client
+                .chat(&self.config, self.harness.history(), &model_user_text)?;
         let decision = PlannerDecision::parse(&planner_json)?;
 
         self.harness.handle_decision(trimmed, decision)

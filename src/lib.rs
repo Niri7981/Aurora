@@ -3,6 +3,7 @@ pub mod cli;
 pub mod config;
 pub mod context;
 pub mod harness;
+pub mod model_provider;
 pub mod ollama;
 pub mod planner;
 pub mod session;

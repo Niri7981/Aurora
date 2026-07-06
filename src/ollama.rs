@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 
 use crate::session::ChatMessage;
 
-const SYSTEM_PROMPT: &str = r#"你是 AuroraPulse 的 planner。你必须只输出 JSON，不要输出 Markdown、解释或额外文本。
+pub const SYSTEM_PROMPT: &str = r#"你是 AuroraPulse 的 planner。你必须只输出 JSON，不要输出 Markdown、解释或额外文本。
 
 根据用户当前请求和最近会话，选择一个 mode：
 - chat：可以直接短回复用户

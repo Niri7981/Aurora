@@ -67,9 +67,21 @@ Any normal request is sent to the model with local identity context prepended:
 ## Environment
 
 ```env
+AURORA_PROVIDER=ollama
 OLLAMA_MODEL=gemma4:e4b
 OLLAMA_URL=http://127.0.0.1:11434
 ```
+
+For an OpenAI-compatible cloud provider:
+
+```env
+AURORA_PROVIDER=openai
+OPENAI_API_KEY=...
+OPENAI_BASE_URL=https://api.openai.com
+OPENAI_MODEL=gpt-4o-mini
+```
+
+`OPENAI_BASE_URL` may point at a compatible gateway. AuroraPulse appends `/v1/chat/completions` unless the base URL already ends in `/v1`.
 
 Optional path overrides:
 

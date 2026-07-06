@@ -18,7 +18,7 @@ Phase 1 caveat:
 - The provider path is still Ollama-only at runtime.
 - Cloud provider privacy filtering exists only as context rendering groundwork, not as a real API call path yet.
 
-## Tomorrow: Phase 2 Cloud Provider Slice
+## Phase 2 Cloud Provider Slice
 
 Goal:
 
@@ -28,13 +28,23 @@ Core principle:
 
 The cloud model should receive a filtered context bundle. It should not own, store, or mutate the user's identity memory.
 
+Current progress:
+- Env-based provider selection is implemented through `AURORA_PROVIDER=ollama|openai`.
+- `OllamaProvider` preserves the existing local path.
+- `OpenAIProvider` calls an OpenAI-compatible `/v1/chat/completions` endpoint.
+- Local `.env` has been verified against a compatible gateway.
+- `OPENAI_MODEL=gpt-5.4-mini` worked with the configured gateway.
+- GPT-compatible first-answer behavior was validated with `我是谁？我最近在做什么？`.
+- Cloud context preview uses the cloud policy and redacts `local-only:` / `private:` lines.
+- Missing `OPENAI_API_KEY` is covered by a clear error and test.
+
 ## Phase 2 Scope
 
-Build:
+Built:
 - `ModelProvider` abstraction.
 - `OllamaProvider` implementation using the current Ollama path.
-- `OpenAIProvider` implementation for one GPT model.
-- CLI provider selection, likely `--provider ollama|openai`.
+- `OpenAIProvider` implementation for one GPT-compatible model.
+- Env-based provider selection through `AURORA_PROVIDER=ollama|openai`.
 - Provider-aware context rendering:
   - local providers may receive full local context.
   - cloud providers receive a shorter filtered bundle.
@@ -49,33 +59,25 @@ Do not build yet:
 - Account sync.
 - MCP adapter.
 
-## Proposed Implementation Order
+## Remaining Implementation Order
 
-1. Add config fields:
-   - `provider`
-   - `openai_api_key`
-   - `openai_model`
-   - maybe `OPENAI_BASE_URL` for compatibility later.
+1. Decide whether env-only provider selection is enough for V2, or add CLI flags:
+   - `--provider ollama`
+   - `--provider openai`
 
-2. Introduce provider interface:
-   - move current `ChatClient` shape toward a provider-neutral trait.
-   - keep messages/history support.
-   - make provider receive already-prepared prompt text.
+2. Improve cloud prompt boundaries:
+   - shrink project context for cloud calls
+   - show a concise cloud bundle by default
+   - keep full preview available for audit
 
-3. Wrap existing Ollama path:
-   - preserve current behavior.
-   - avoid changing planner/harness semantics.
+3. Replace the temporary `curl` implementation when the provider layer stabilizes:
+   - evaluate a small blocking Rust HTTP client
+   - keep tests provider-neutral
 
-4. Add OpenAI provider:
-   - use HTTPS API call.
-   - send system planner prompt plus context-aware user message.
-   - parse response content using existing `PlannerDecision::parse`.
+4. Add one more cloud provider only after OpenAI-compatible behavior is stable:
+   - Anthropic or Gemini, not both at once.
 
-5. Add CLI/provider selection:
-   - default remains Ollama.
-   - allow env var first if command flags are too much for one day.
-
-6. Validate behavior:
+5. Keep validating behavior:
    - `/context preview` for local provider.
    - `/context preview openai` or equivalent for cloud-filtered preview.
    - Ask GPT: `我是谁？我最近在做什么？`
@@ -90,6 +92,10 @@ Phase 2 is done when:
 - Cloud provider prompts exclude `local-only:` and `private:` lines.
 - Missing API key produces a clear user-facing error.
 - `cargo test` passes.
+
+Current result:
+- All criteria above are met for the OpenAI-compatible gateway path.
+- Remaining work is hardening, UX, and deciding whether to keep `curl` or move to a Rust HTTP client.
 
 ## Product Check
 
