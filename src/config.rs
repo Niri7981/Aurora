@@ -24,6 +24,15 @@ pub struct AppConfig {
     pub privacy_rules_path: PathBuf,
 }
 
+impl AppConfig {
+    pub fn active_model(&self) -> &str {
+        match self.provider.as_str() {
+            "openai" => self.openai_model.as_str(),
+            _ => self.model.as_str(),
+        }
+    }
+}
+
 pub fn load_config(workspace_arg: Option<String>) -> Result<AppConfig, String> {
     let workspace_input = workspace_arg.unwrap_or_else(|| ".".to_string());
     let workspace = resolve_workspace(Path::new(&workspace_input))?;
