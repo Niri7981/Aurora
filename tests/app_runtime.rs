@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use aurora::app::{App, TurnOutcome};
 use aurora::config::AppConfig;
-use aurora::model_provider::{ChatClient, ConfiguredChatClient};
+use aurora::model::{ChatClient, ConfiguredChatClient};
 use aurora::session::ChatMessage;
 
 struct PanicClient;

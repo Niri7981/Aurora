@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::app::{App, TurnOutcome};
 use crate::config::AppConfig;
-use crate::model_provider::ConfiguredChatClient;
+use crate::model::ConfiguredChatClient;
 
 const APP_NAME: &str = "A U R O R A";
 const APP_TAGLINE: &str = "local-first assistant shell";

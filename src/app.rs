@@ -1,7 +1,7 @@
 use crate::config::AppConfig;
 use crate::context;
 use crate::harness::Harness;
-use crate::model_provider::ChatClient;
+use crate::model::ChatClient;
 use crate::planner::PlannerDecision;
 
 #[derive(Debug, PartialEq, Eq)]

@@ -3,9 +3,12 @@ use std::net::TcpStream;
 
 use serde_json::{Value, json};
 
+use crate::config::AppConfig;
 use crate::session::ChatMessage;
 
-pub const SYSTEM_PROMPT: &str = r#"你是 AuroraPulse 的 planner。你必须只输出 JSON，不要输出 Markdown、解释或额外文本。
+use super::ChatClient;
+
+pub(super) const SYSTEM_PROMPT: &str = r#"你是 AuroraPulse 的 planner。你必须只输出 JSON，不要输出 Markdown、解释或额外文本。
 
 根据用户当前请求和最近会话，选择一个 mode：
 - chat：可以直接短回复用户
@@ -30,7 +33,24 @@ pub const SYSTEM_PROMPT: &str = r#"你是 AuroraPulse 的 planner。你必须只
 - 不要声称已经执行工具或检索
 "#;
 
-pub fn chat(
+pub(super) struct OllamaProvider;
+
+impl ChatClient for OllamaProvider {
+    fn provider_name<'a>(&self, _config: &'a AppConfig) -> &'a str {
+        "ollama"
+    }
+
+    fn chat(
+        &mut self,
+        config: &AppConfig,
+        history: &[ChatMessage],
+        user_text: &str,
+    ) -> Result<String, String> {
+        chat(&config.ollama_url, &config.model, history, user_text)
+    }
+}
+
+fn chat(
     ollama_url: &str,
     model: &str,
     history: &[ChatMessage],

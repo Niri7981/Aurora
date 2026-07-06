@@ -15,8 +15,8 @@ Done:
 
 Phase 1 caveat:
 - The identity card is currently user-edited text, not generated through onboarding questions.
-- The provider path is still Ollama-only at runtime.
-- Cloud provider privacy filtering exists only as context rendering groundwork, not as a real API call path yet.
+- Phase 1 originally used the Ollama-only runtime path; Phase 2 now adds the OpenAI-compatible provider path.
+- Cloud provider privacy filtering now applies to preview and model context rendering, but the policy is still marker-based and should be hardened.
 
 ## Phase 2 Cloud Provider Slice
 

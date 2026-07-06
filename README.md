@@ -101,9 +101,13 @@ src/
   app.rs
   cli.rs
   config.rs
-  context.rs
+  context/
+    mod.rs
   harness.rs
-  ollama.rs
+  model/
+    mod.rs
+    ollama.rs
+    openai.rs
   planner.rs
   session.rs
 tests/

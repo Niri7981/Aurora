@@ -148,13 +148,10 @@ Purpose:
 - assemble the smallest useful context bundle for the current request
 - keep local memory separate from provider-owned account memory
 
-Suggested future files:
+Current and future files:
 
-- `src/context.rs`
-- `src/context/identity.rs`
-- `src/context/project.rs`
-- `src/context/bundle.rs`
-- `src/context/privacy.rs`
+- `src/context/mod.rs`
+- future split candidates: `identity.rs`, `project.rs`, `bundle.rs`, `privacy.rs`
 
 V1 responsibilities:
 
@@ -180,9 +177,11 @@ V1 local data examples:
 Purpose:
 - call the selected model without tying AuroraPulse memory to that provider
 
-Suggested future file:
+Current files:
 
-- `src/model_provider.rs`
+- `src/model/mod.rs`
+- `src/model/ollama.rs`
+- `src/model/openai.rs`
 
 Expected providers:
 
@@ -488,16 +487,12 @@ src/
   app.rs
   cli.rs
   config.rs
-  context.rs
   context/
-    identity.rs
-    focus.rs
-    preferences.rs
-    privacy.rs
-    project.rs
-    bundle.rs
-  model_provider.rs
-  ollama.rs
+    mod.rs
+  model/
+    mod.rs
+    ollama.rs
+    openai.rs
   harness.rs
   planner.rs
   session.rs

@@ -198,8 +198,8 @@ V1 可以演示“无账号 API / 本地模型也有账号级身份体验”。
 
 这一版任务表默认以当前 Rust 结构为基础：
 
-- 已有文件：`src/main.rs`、`src/cli.rs`、`src/config.rs`、`src/ollama.rs`、`src/session.rs`
-- 接下来会新增：`src/context/`、`src/model_provider.rs`、`src/context.rs`
+- 已有文件：`src/main.rs`、`src/cli.rs`、`src/config.rs`、`src/session.rs`
+- 当前新增结构：`src/context/`、`src/model/`
 
 ### A. 现有文件要做什么
 
@@ -208,32 +208,28 @@ V1 可以演示“无账号 API / 本地模型也有账号级身份体验”。
 | `src/main.rs` | 入口，加载 config 后进入 CLI | 改成更薄的启动入口，只负责组装 app 和启动 mode | `main.rs` 不再承载业务流程 |
 | `src/cli.rs` | Banner + 文本 REPL | 增加 `ask` 和 `context preview` 的入口 | CLI 可以展示将注入模型的上下文 |
 | `src/config.rs` | 读取 workspace、dotenv、模型配置 | 扩展 identity 文件路径、provider 配置、隐私策略配置 | 配置结构能支撑本地和未来云端 provider |
-| `src/ollama.rs` | 直接 chat 请求 | 收进 `OllamaProvider`，不再让上层直接依赖 Ollama | 模型调用接口不再和 CLI 会话逻辑耦合 |
+| `src/model/ollama.rs` | Ollama provider | 封装本地 Ollama 调用 | 模型调用接口不再和 CLI 会话逻辑耦合 |
 | `src/session.rs` | 简单聊天历史 | 收紧成 working session，只保留最近上下文；不要让它承担长期记忆 | 只服务短时上下文和最近 turn |
 
 ### B. 需要新增的核心模块
 
 | 模块 | 作用 | 主要任务 | 完成标准 |
 | --- | --- | --- | --- |
-| `src/context.rs` | context 门面 | 对外暴露加载和 bundle 生成能力 | 上层不需要知道具体文件布局 |
-| `src/context/identity.rs` | 身份卡读取 | 读取 `identity-card.md` | 模型可获得“你是谁”的短上下文 |
-| `src/context/focus.rs` | 当前 focus | 读取 `current-focus.md` | 模型可知道用户最近在做什么 |
-| `src/context/preferences.rs` | 偏好读取 | 读取稳定偏好 | 回答风格和工作偏好可进入 bundle |
-| `src/context/privacy.rs` | 隐私规则 | 根据 provider 过滤字段 | 云端 API 不会默认拿到过宽上下文 |
-| `src/context/project.rs` | 项目上下文 | 探测 `CONTEXT.md` / `AGENTS.md` / `CLAUDE.md` | 项目层信息不混进个人长期记忆 |
-| `src/context/bundle.rs` | bundle 生成 | 组装、预览、标注来源 | context bundle 可审计 |
-| `src/model_provider.rs` | 模型 provider 抽象 | 定义 provider trait / enum | Ollama 和未来 API 共用同一入口 |
+| `src/context/mod.rs` | context 门面 | 读取本地身份文件、项目上下文，生成 preview 和 bundle | 上层不需要知道具体文件布局 |
+| `src/model/mod.rs` | 模型 provider 抽象 | 定义 provider trait / enum | Ollama 和未来 API 共用同一入口 |
+| `src/model/ollama.rs` | Ollama provider | 调本地 Ollama chat API | 本地 provider 路径稳定 |
+| `src/model/openai.rs` | OpenAI-compatible provider | 调 `/v1/chat/completions` | 云端 provider 路径可验证 |
 
 ### C. Day 1 到 Day 7 的具体任务表
 
 | 天数 | 主要文件 | 具体任务 | 当天产出 |
 | --- | --- | --- | --- |
 | `Day 1` | `src/config.rs` 样例本地文件 | 定身份文件格式和默认路径 | 可编辑 identity 文件 |
-| `Day 2` | `src/context.rs` `src/context/*.rs` | 实现 context loader | 能读取身份和 focus |
-| `Day 3` | `src/context/bundle.rs` `src/cli.rs` | 实现 context preview | 可审计 context bundle |
-| `Day 4` | `src/model_provider.rs` `src/ollama.rs` | 抽象 provider 并接入 Ollama | provider 可替换 |
+| `Day 2` | `src/context/mod.rs` | 实现 context loader | 能读取身份和 focus |
+| `Day 3` | `src/context/mod.rs` `src/cli.rs` | 实现 context preview | 可审计 context bundle |
+| `Day 4` | `src/model/mod.rs` `src/model/ollama.rs` | 抽象 provider 并接入 Ollama | provider 可替换 |
 | `Day 5` | `src/app.rs` `src/harness.rs` `src/cli.rs` | 串起 identity-aware ask | 第一问知道用户是谁 |
-| `Day 6` | `src/context/privacy.rs` tests | 加 provider 隐私过滤 | 云端 API 铺路 |
+| `Day 6` | `src/context/mod.rs` tests | 加 provider 隐私过滤 | 云端 API 铺路 |
 | `Day 7` | tests docs examples | 联调、补测试、写样例 | V1 可演示 |
 
 ### D. 每天的最小交付检查
@@ -251,7 +247,7 @@ V1 可以演示“无账号 API / 本地模型也有账号级身份体验”。
 
 1. 先盯 `config + identity-card + current-focus`
 2. 再盯 `context loader + bundle preview`
-3. 然后盯 `model_provider + ollama`
+3. 然后盯 `model/mod.rs + model/ollama.rs + model/openai.rs`
 4. 最后盯 `ask + privacy filtering + tests`
 
 也就是说：

@@ -6,10 +6,10 @@ use serde_json::Value;
 use crate::config::AppConfig;
 
 const PROJECT_CONTEXT_FILES: [&str; 3] = ["CONTEXT.md", "AGENTS.md", "CLAUDE.md"];
-const IDENTITY_CARD_TEMPLATE: &str = include_str!("../examples/identity-card.md");
-const CURRENT_FOCUS_TEMPLATE: &str = include_str!("../examples/current-focus.md");
-const PREFERENCES_TEMPLATE: &str = include_str!("../examples/preferences.json");
-const PRIVACY_RULES_TEMPLATE: &str = include_str!("../examples/privacy-rules.json");
+const IDENTITY_CARD_TEMPLATE: &str = include_str!("../../examples/identity-card.md");
+const CURRENT_FOCUS_TEMPLATE: &str = include_str!("../../examples/current-focus.md");
+const PREFERENCES_TEMPLATE: &str = include_str!("../../examples/preferences.json");
+const PRIVACY_RULES_TEMPLATE: &str = include_str!("../../examples/privacy-rules.json");
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextDocument {

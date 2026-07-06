@@ -5,58 +5,10 @@ use serde_json::{Value, json};
 use crate::config::AppConfig;
 use crate::session::ChatMessage;
 
-pub trait ChatClient {
-    fn provider_name<'a>(&self, config: &'a AppConfig) -> &'a str;
+use super::ChatClient;
+use super::ollama::SYSTEM_PROMPT;
 
-    fn chat(
-        &mut self,
-        config: &AppConfig,
-        history: &[ChatMessage],
-        user_text: &str,
-    ) -> Result<String, String>;
-}
-
-pub struct ConfiguredChatClient;
-
-impl ChatClient for ConfiguredChatClient {
-    fn provider_name<'a>(&self, config: &'a AppConfig) -> &'a str {
-        config.provider.as_str()
-    }
-
-    fn chat(
-        &mut self,
-        config: &AppConfig,
-        history: &[ChatMessage],
-        user_text: &str,
-    ) -> Result<String, String> {
-        match config.provider.as_str() {
-            "ollama" => OllamaProvider.chat(config, history, user_text),
-            "openai" => OpenAiProvider.chat(config, history, user_text),
-            other => Err(format!(
-                "unknown AURORA_PROVIDER `{other}`; expected `ollama` or `openai`"
-            )),
-        }
-    }
-}
-
-pub struct OllamaProvider;
-
-impl ChatClient for OllamaProvider {
-    fn provider_name<'a>(&self, _config: &'a AppConfig) -> &'a str {
-        "ollama"
-    }
-
-    fn chat(
-        &mut self,
-        config: &AppConfig,
-        history: &[ChatMessage],
-        user_text: &str,
-    ) -> Result<String, String> {
-        crate::ollama::chat(&config.ollama_url, &config.model, history, user_text)
-    }
-}
-
-pub struct OpenAiProvider;
+pub(super) struct OpenAiProvider;
 
 impl ChatClient for OpenAiProvider {
     fn provider_name<'a>(&self, _config: &'a AppConfig) -> &'a str {
@@ -77,7 +29,7 @@ impl ChatClient for OpenAiProvider {
         let endpoint = build_chat_completions_endpoint(&config.openai_base_url);
         let mut messages = vec![json!({
             "role": "system",
-            "content": crate::ollama::SYSTEM_PROMPT
+            "content": SYSTEM_PROMPT
         })];
 
         for message in history {
@@ -132,7 +84,7 @@ impl ChatClient for OpenAiProvider {
     }
 }
 
-pub fn build_chat_completions_endpoint(base_url: &str) -> String {
+fn build_chat_completions_endpoint(base_url: &str) -> String {
     let trimmed = base_url.trim_end_matches('/');
     if trimmed.ends_with("/v1") {
         format!("{trimmed}/chat/completions")
