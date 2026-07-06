@@ -43,6 +43,14 @@ impl<C: ChatClient> App<C> {
             return Ok(TurnOutcome::Cleared("助手> 已清空当前会话。".to_string()));
         }
 
+        if trimmed == "/model" {
+            return Ok(TurnOutcome::Reply(format!(
+                "助手>\nProvider: {}\nModel: {}",
+                self.config.provider,
+                self.config.active_model()
+            )));
+        }
+
         if trimmed == "/context" || trimmed.starts_with("/context preview") {
             let local_context = context::load(&self.config)?;
             let preview_provider = trimmed
@@ -63,7 +71,12 @@ impl<C: ChatClient> App<C> {
 
         let local_context = context::load(&self.config)?;
         let provider = self.client.provider_name(&self.config);
-        let model_user_text = context::compose_user_prompt(&local_context, provider, trimmed);
+        let model_user_text = context::compose_user_prompt(
+            &local_context,
+            provider,
+            self.config.active_model(),
+            trimmed,
+        );
         let planner_json =
             self.client
                 .chat(&self.config, self.harness.history(), &model_user_text)?;

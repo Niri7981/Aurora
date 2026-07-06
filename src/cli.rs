@@ -15,12 +15,12 @@ const ACCENT: &str = "\x1b[38;5;215m";
 const MUTED: &str = "\x1b[38;5;246m";
 
 pub fn run(config: &AppConfig) -> Result<(), String> {
-    let model = match config.provider.as_str() {
-        "openai" => config.openai_model.as_str(),
-        _ => config.model.as_str(),
-    };
-    render_banner(Path::new(&config.workspace), &config.provider, model)
-        .map_err(|err| err.to_string())?;
+    render_banner(
+        Path::new(&config.workspace),
+        &config.provider,
+        config.active_model(),
+    )
+    .map_err(|err| err.to_string())?;
     repl_loop(config)
 }
 

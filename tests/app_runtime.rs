@@ -133,8 +133,26 @@ fn model_planner_json_is_routed_through_harness() {
 }
 
 #[test]
+fn model_command_reports_current_provider_and_model() {
+    let mut config = test_config();
+    config.provider = "openai".to_string();
+    config.openai_model = "gpt-5.4".to_string();
+    let client = PanicClient;
+    let mut app = App::new(config, client);
+
+    let outcome = app.handle_text("/model").expect("turn should succeed");
+
+    assert_eq!(
+        outcome,
+        TurnOutcome::Reply("助手>\nProvider: openai\nModel: gpt-5.4".to_string())
+    );
+}
+
+#[test]
 fn user_request_is_prefixed_with_identity_context_before_model_call() {
-    let config = test_config();
+    let mut config = test_config();
+    config.provider = "openai".to_string();
+    config.openai_model = "gpt-5.4".to_string();
     write_file(
         &config.identity_card_path,
         "# Identity Card\nI am building AuroraPulse.",
@@ -160,6 +178,9 @@ fn user_request_is_prefixed_with_identity_context_before_model_call() {
         .borrow()
         .clone()
         .expect("model should receive a user message");
+    assert!(user_text.contains("## Aurora Runtime"));
+    assert!(user_text.contains("Provider: openai"));
+    assert!(user_text.contains("Model: gpt-5.4"));
     assert!(user_text.contains("## Identity Card"));
     assert!(user_text.contains("I am building AuroraPulse."));
     assert!(user_text.contains("## Current Focus"));

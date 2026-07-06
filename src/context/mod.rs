@@ -198,14 +198,21 @@ pub fn init_files(config: &AppConfig) -> Result<InitReport, String> {
     Ok(report)
 }
 
-pub fn compose_user_prompt(context: &LocalContext, provider: &str, user_text: &str) -> String {
+pub fn compose_user_prompt(
+    context: &LocalContext,
+    provider: &str,
+    model: &str,
+    user_text: &str,
+) -> String {
     let context_text = context.render_model_context(provider);
+    let runtime_text = format!("## Aurora Runtime\nProvider: {provider}\nModel: {model}");
     if context_text.trim().is_empty() {
-        return user_text.to_string();
+        return format!("{runtime_text}\n\nCurrent user request:\n{user_text}");
     }
 
     format!(
-        "{context_text}\n\nCurrent user request:\n{user_text}",
+        "{runtime_text}\n\n{context_text}\n\nCurrent user request:\n{user_text}",
+        runtime_text = runtime_text,
         context_text = context_text,
         user_text = user_text
     )
