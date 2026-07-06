@@ -2,7 +2,7 @@ use std::env;
 use std::io::{self, Write};
 use std::path::Path;
 
-use crate::app::{App, TurnOutcome};
+use crate::app::{App, TurnOutcome, should_show_thinking_indicator};
 use crate::config::AppConfig;
 use crate::model::ConfiguredChatClient;
 
@@ -67,9 +67,7 @@ fn repl_loop(config: &AppConfig) -> Result<(), String> {
             .map_err(|err| format!("failed to read input from terminal: {err}"))?;
         let trimmed = input.trim();
 
-        let should_show_thinking =
-            !trimmed.is_empty() && !matches!(trimmed, "quit" | "exit" | "/clear");
-        if should_show_thinking {
+        if should_show_thinking_indicator(trimmed) {
             println!("助手> 正在思考...");
         }
 
