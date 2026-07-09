@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use aurora::app::{App, TurnOutcome};
@@ -50,6 +51,8 @@ struct CaptureClient {
     seen_user_text: Rc<RefCell<Option<String>>>,
 }
 
+static TEMP_DIR_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
 impl ChatClient for CaptureClient {
     fn provider_name<'a>(&self, config: &'a AppConfig) -> &'a str {
         config.provider.as_str()
@@ -85,11 +88,13 @@ fn test_config() -> AppConfig {
 }
 
 fn unique_temp_dir(label: &str) -> PathBuf {
+    let counter = TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system clock should be after epoch")
         .as_nanos();
-    let root = std::env::temp_dir().join(format!("aurora-{label}-{nanos}"));
+    let pid = std::process::id();
+    let root = std::env::temp_dir().join(format!("aurora-{label}-{pid}-{counter}-{nanos}"));
     fs::create_dir_all(&root).expect("temp dir should be created");
     root
 }

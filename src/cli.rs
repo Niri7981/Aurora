@@ -1,10 +1,11 @@
 use std::env;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::path::Path;
 
 use crate::app::{App, TurnOutcome, should_show_thinking_indicator};
 use crate::config::AppConfig;
 use crate::model::ConfiguredChatClient;
+use crate::startup_animation;
 
 const APP_NAME: &str = "A U R O R A";
 const APP_TAGLINE: &str = "local-first assistant shell";
@@ -32,16 +33,27 @@ fn render_banner(workspace: &Path, provider: &str, model: &str) -> io::Result<()
         .unwrap_or(80)
         .min(88);
     let rule = "─".repeat(width);
+    let is_terminal = stdout.is_terminal();
+    let should_animate = is_terminal
+        && env::var_os("AURORA_NO_ANIMATION").is_none()
+        && env::var("TERM").map(|term| term != "dumb").unwrap_or(true);
+
+    if should_animate {
+        startup_animation::play().map_err(io::Error::other)?;
+    }
+
+    if !is_terminal || !should_animate {
+        write!(
+            stdout,
+            "{ACCENT}{BOLD}  {APP_NAME}{RESET}\n{DIM}  {APP_TAGLINE}{RESET}\n\n"
+        )?;
+    }
 
     write!(
         stdout,
-        "\x1b[2J\x1b[H{accent}{bold}  {name}{reset}\n{dim}  {tagline}{reset}\n\n{muted}  Provider  {reset}{provider}\n{muted}  Model     {reset}{model}\n{muted}  Mode      {reset}CLI\n{muted}  Workspace {reset}{workspace}\n\n{muted}{rule}{reset}\n{dim}  Type a request, or 'quit' to exit.{reset}\n\n",
-        accent = ACCENT,
-        bold = BOLD,
-        name = APP_NAME,
+        "{muted}  Provider  {reset}{provider}\n{muted}  Model     {reset}{model}\n{muted}  Mode      {reset}CLI\n{muted}  Workspace {reset}{workspace}\n\n{muted}{rule}{reset}\n{dim}  Type a request, or 'quit' to exit.{reset}\n\n",
         reset = RESET,
         dim = DIM,
-        tagline = APP_TAGLINE,
         muted = MUTED,
         provider = provider,
         model = model,

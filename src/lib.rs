@@ -6,6 +6,8 @@ pub mod harness;
 pub mod model;
 pub mod planner;
 pub mod session;
+pub mod startup_animation;
+pub mod tools;
 
 pub fn run(workspace_arg: Option<String>) -> Result<(), String> {
     let config = config::load_config(workspace_arg)?;
