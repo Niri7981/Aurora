@@ -31,6 +31,10 @@ struct JsonClient {
     response: String,
 }
 
+struct QueueClient {
+    responses: Rc<RefCell<Vec<String>>>,
+}
+
 impl ChatClient for JsonClient {
     fn provider_name<'a>(&self, _config: &'a AppConfig) -> &'a str {
         "ollama"
@@ -43,6 +47,25 @@ impl ChatClient for JsonClient {
         _user_text: &str,
     ) -> Result<String, String> {
         Ok(self.response.clone())
+    }
+}
+
+impl ChatClient for QueueClient {
+    fn provider_name<'a>(&self, _config: &'a AppConfig) -> &'a str {
+        "ollama"
+    }
+
+    fn chat(
+        &mut self,
+        _config: &AppConfig,
+        _history: &[ChatMessage],
+        _user_text: &str,
+    ) -> Result<String, String> {
+        let mut responses = self.responses.borrow_mut();
+        if responses.is_empty() {
+            panic!("model client should not be called again");
+        }
+        Ok(responses.remove(0))
     }
 }
 
@@ -134,6 +157,40 @@ fn model_planner_json_is_routed_through_harness() {
     assert_eq!(
         outcome,
         TurnOutcome::Reply("助手> 你想打开哪个应用？".to_string())
+    );
+}
+
+#[test]
+fn pending_tool_cancellation_is_handled_without_calling_model_again() {
+    let config = test_config();
+    let responses = Rc::new(RefCell::new(vec![
+        r#"{
+            "mode": "tool",
+            "tool_name": "local_launch.open_app",
+            "arguments": {
+                "app_name": "Safari"
+            }
+        }"#
+        .to_string(),
+    ]));
+    let client = QueueClient {
+        responses: Rc::clone(&responses),
+    };
+    let mut app = App::new(config, client);
+
+    let first = app.handle_text("打开 Safari").expect("turn should succeed");
+    assert_eq!(
+        first,
+        TurnOutcome::Reply(
+            "助手> 打开 Safari 是一个本地启动动作，需要你确认。 回复“确认”后我再执行。".to_string()
+        )
+    );
+
+    let second = app.handle_text("取消").expect("turn should succeed");
+    assert_eq!(second, TurnOutcome::Reply("助手> 已取消。".to_string()));
+    assert!(
+        responses.borrow().is_empty(),
+        "the only model response should have been consumed by the first turn"
     );
 }
 

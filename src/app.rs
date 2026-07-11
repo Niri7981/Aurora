@@ -94,6 +94,10 @@ impl<C: ChatClient> App<C> {
             return Ok(TurnOutcome::Reply(render_user_identity(&local_context)));
         }
 
+        if let Some(outcome) = self.harness.handle_pending_input(trimmed) {
+            return outcome;
+        }
+
         let local_context = context::load(&self.config)?;
         let provider = self.client.provider_name(&self.config);
         let model_user_text = context::compose_user_prompt(
@@ -125,6 +129,7 @@ pub fn should_show_thinking_indicator(input: &str) -> bool {
         && !matches!(trimmed, "quit" | "exit")
         && !trimmed.starts_with('/')
         && !is_incomplete_fragment(trimmed)
+        && !is_pending_control_reply(trimmed)
         && !is_model_question(trimmed)
         && !is_assistant_identity_question(trimmed)
         && !is_user_identity_question(trimmed)
@@ -169,6 +174,32 @@ fn is_user_identity_question(input: &str) -> bool {
 
 fn is_incomplete_fragment(input: &str) -> bool {
     matches!(normalize_question(input).as_str(), "我" | "你")
+}
+
+fn is_pending_control_reply(input: &str) -> bool {
+    matches!(
+        normalize_question(input).to_lowercase().as_str(),
+        "确认"
+            | "确定"
+            | "可以"
+            | "执行"
+            | "打开"
+            | "好"
+            | "好的"
+            | "ok"
+            | "okay"
+            | "yes"
+            | "y"
+            | "取消"
+            | "算了"
+            | "不用"
+            | "别"
+            | "不要"
+            | "停止"
+            | "cancel"
+            | "no"
+            | "n"
+    )
 }
 
 fn normalize_question(input: &str) -> String {

@@ -69,7 +69,9 @@ class _CallbackHandler(BaseHTTPRequestHandler):
 class SpotifyController:
     def __init__(self) -> None:
         if not SPOTIFY_CLIENT_ID or SPOTIFY_CLIENT_ID == "your_spotify_client_id":
-            raise SpotifyAuthError("请先在 .env 里配置 SPOTIFY_CLIENT_ID")
+            raise SpotifyAuthError(
+                ".env 里的 SPOTIFY_CLIENT_ID 还是空值或占位符；请把它换成 Spotify Developer app 的真实 Client ID"
+            )
         self.client_id = SPOTIFY_CLIENT_ID
         self.redirect_uri = SPOTIFY_REDIRECT_URI
         self.token_data = _read_token_cache()
@@ -284,4 +286,3 @@ class SpotifyController:
         self._request(
             "PUT", "/me/player/volume", params={"volume_percent": volume_percent}
         )
-
