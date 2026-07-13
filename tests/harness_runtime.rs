@@ -1,5 +1,5 @@
 use aurora::app::TurnOutcome;
-use aurora::harness::Harness;
+use aurora::harness::{ConfirmationDecision, Harness};
 use aurora::planner::PlannerDecision;
 use aurora::tools::{
     ArgumentKind, RequiredArgument, ToolConfirmation, ToolDefinition, ToolOutcome, ToolRegistry,
@@ -110,15 +110,15 @@ fn tool_decision_is_routed_through_tool_registry() {
 
     assert_eq!(
         outcome,
-        TurnOutcome::Reply(
-            "助手> 打开 Spotify 是一个本地启动动作，需要你确认。 回复“确认”后我再执行。"
-                .to_string()
-        )
+        TurnOutcome::Confirmation {
+            tool_name: "local_launch.open_app".to_string(),
+            prompt: "打开 Spotify 是一个本地启动动作，需要你确认。".to_string(),
+        }
     );
 }
 
 #[test]
-fn confirmation_reply_executes_pending_tool_without_model() {
+fn allow_once_executes_pending_tool() {
     let mut harness = Harness::with_tool_registry(fake_confirmation_registry());
 
     let first = harness
@@ -133,12 +133,14 @@ fn confirmation_reply_executes_pending_tool_without_model() {
 
     assert_eq!(
         first,
-        TurnOutcome::Reply("助手> 执行 测试动作 需要确认。 回复“确认”后我再执行。".to_string())
+        TurnOutcome::Confirmation {
+            tool_name: "test.confirmed_action".to_string(),
+            prompt: "执行 测试动作 需要确认。".to_string(),
+        }
     );
 
     let confirmed = harness
-        .handle_pending_input("确认")
-        .expect("pending action should be handled")
+        .resolve_confirmation(ConfirmationDecision::AllowOnce)
         .expect("confirmation should succeed");
 
     assert_eq!(
@@ -148,7 +150,7 @@ fn confirmation_reply_executes_pending_tool_without_model() {
 }
 
 #[test]
-fn cancellation_reply_clears_pending_tool() {
+fn deny_cancels_pending_tool() {
     let mut harness = Harness::with_tool_registry(fake_confirmation_registry());
 
     harness
@@ -162,12 +164,53 @@ fn cancellation_reply_clears_pending_tool() {
         .expect("decision should be handled");
 
     let cancelled = harness
-        .handle_pending_input("取消")
-        .expect("pending action should be handled")
+        .resolve_confirmation(ConfirmationDecision::Deny)
         .expect("cancellation should succeed");
 
     assert_eq!(cancelled, TurnOutcome::Reply("助手> 已取消。".to_string()));
-    assert!(harness.handle_pending_input("确认").is_none());
+    assert!(
+        harness
+            .resolve_confirmation(ConfirmationDecision::AllowOnce)
+            .is_err()
+    );
+}
+
+#[test]
+fn always_allow_skips_future_confirmation_for_the_same_tool() {
+    let mut harness = Harness::with_tool_registry(fake_confirmation_registry());
+
+    let first = harness
+        .handle_decision(
+            "执行第一次动作",
+            PlannerDecision::Tool {
+                tool_name: "test.confirmed_action".to_string(),
+                arguments: json!({ "target": "第一次动作" }),
+            },
+        )
+        .expect("decision should be handled");
+    assert!(matches!(first, TurnOutcome::Confirmation { .. }));
+
+    let allowed = harness
+        .resolve_confirmation(ConfirmationDecision::AlwaysAllow)
+        .expect("always allow should execute the pending action");
+    assert_eq!(
+        allowed,
+        TurnOutcome::Reply("助手> 已执行 第一次动作。".to_string())
+    );
+
+    let second = harness
+        .handle_decision(
+            "执行第二次动作",
+            PlannerDecision::Tool {
+                tool_name: "test.confirmed_action".to_string(),
+                arguments: json!({ "target": "第二次动作" }),
+            },
+        )
+        .expect("always-allowed tool should execute immediately");
+    assert_eq!(
+        second,
+        TurnOutcome::Reply("助手> 已执行 第二次动作。".to_string())
+    );
 }
 
 #[test]

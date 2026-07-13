@@ -7,6 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use aurora::app::{App, TurnOutcome};
 use aurora::config::AppConfig;
+use aurora::harness::ConfirmationDecision;
 use aurora::model::{ChatClient, ConfiguredChatClient};
 use aurora::session::ChatMessage;
 
@@ -161,7 +162,7 @@ fn model_planner_json_is_routed_through_harness() {
 }
 
 #[test]
-fn pending_tool_cancellation_is_handled_without_calling_model_again() {
+fn pending_tool_denial_is_handled_without_calling_model_again() {
     let config = test_config();
     let responses = Rc::new(RefCell::new(vec![
         r#"{
@@ -181,12 +182,15 @@ fn pending_tool_cancellation_is_handled_without_calling_model_again() {
     let first = app.handle_text("打开 Safari").expect("turn should succeed");
     assert_eq!(
         first,
-        TurnOutcome::Reply(
-            "助手> 打开 Safari 是一个本地启动动作，需要你确认。 回复“确认”后我再执行。".to_string()
-        )
+        TurnOutcome::Confirmation {
+            tool_name: "local_launch.open_app".to_string(),
+            prompt: "打开 Safari 是一个本地启动动作，需要你确认。".to_string(),
+        }
     );
 
-    let second = app.handle_text("取消").expect("turn should succeed");
+    let second = app
+        .resolve_confirmation(ConfirmationDecision::Deny)
+        .expect("denial should succeed");
     assert_eq!(second, TurnOutcome::Reply("助手> 已取消。".to_string()));
     assert!(
         responses.borrow().is_empty(),
