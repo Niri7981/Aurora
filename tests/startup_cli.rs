@@ -55,11 +55,7 @@ fn clears_session_and_exits_through_cli_commands() {
 #[test]
 fn local_slash_commands_do_not_print_thinking_line() {
     let cwd = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let output = run_aurora(
-        &["."],
-        "我是谁？\n你现在的模型是谁\n我\n/model\n你是谁啊？\nquit\n",
-        cwd,
-    );
+    let output = run_aurora(&["."], "/model\n/resume\n/clear\nquit\n", cwd);
 
     assert!(output.status.success());
 

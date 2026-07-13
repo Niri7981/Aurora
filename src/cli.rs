@@ -2,12 +2,14 @@ use std::env;
 use std::io::{self, IsTerminal, Write};
 use std::path::Path;
 
-use crossterm::cursor::MoveUp;
+use crossterm::cursor::{MoveToColumn, MoveUp};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{Clear, ClearType, disable_raw_mode, enable_raw_mode};
+use unicode_width::UnicodeWidthChar;
 
 use crate::app::{App, TurnOutcome, should_show_thinking_indicator};
+use crate::command_palette::matching_commands;
 use crate::config::AppConfig;
 use crate::harness::ConfirmationDecision;
 use crate::model::ConfiguredChatClient;
@@ -76,13 +78,9 @@ fn repl_loop(config: &AppConfig) -> Result<(), String> {
     let mut app = App::new(config.clone(), ConfiguredChatClient);
 
     loop {
-        write!(stdout, "{ACCENT}> {RESET}").map_err(|err| err.to_string())?;
-        stdout.flush().map_err(|err| err.to_string())?;
-
-        let mut input = String::new();
-        stdin
-            .read_line(&mut input)
-            .map_err(|err| format!("failed to read input from terminal: {err}"))?;
+        let Some(input) = read_request(&stdin, &mut stdout)? else {
+            break;
+        };
         let trimmed = input.trim();
 
         if should_show_thinking_indicator(trimmed) {
@@ -112,6 +110,158 @@ fn repl_loop(config: &AppConfig) -> Result<(), String> {
         }
     }
 
+    Ok(())
+}
+
+fn read_request(stdin: &io::Stdin, stdout: &mut io::Stdout) -> Result<Option<String>, String> {
+    if !stdin.is_terminal() || !stdout.is_terminal() {
+        write!(stdout, "{ACCENT}> {RESET}").map_err(|err| err.to_string())?;
+        stdout.flush().map_err(|err| err.to_string())?;
+
+        let mut input = String::new();
+        let bytes_read = stdin
+            .read_line(&mut input)
+            .map_err(|err| format!("failed to read input from terminal: {err}"))?;
+        return Ok((bytes_read > 0).then_some(input));
+    }
+
+    let _raw_mode = RawModeGuard::enter()?;
+    let mut input = Vec::<char>::new();
+    let mut cursor = 0;
+    let mut selected = 0;
+    let mut previous_suggestions = 0;
+    render_request_editor(stdout, &input, cursor, selected, &mut previous_suggestions)?;
+
+    loop {
+        let Event::Key(key) = event::read().map_err(|err| err.to_string())? else {
+            continue;
+        };
+        if key.kind != KeyEventKind::Press {
+            continue;
+        }
+
+        let current = input.iter().collect::<String>();
+        let suggestions = matching_commands(&current);
+
+        match key.code {
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                clear_request_suggestions(stdout, previous_suggestions)?;
+                execute!(stdout, MoveToColumn(0), Clear(ClearType::CurrentLine))
+                    .map_err(|err| err.to_string())?;
+                write!(stdout, "^C\r\n").map_err(|err| err.to_string())?;
+                stdout.flush().map_err(|err| err.to_string())?;
+                return Ok(Some("quit".to_string()));
+            }
+            KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                input.insert(cursor, ch);
+                cursor += 1;
+                selected = 0;
+            }
+            KeyCode::Backspace if cursor > 0 => {
+                cursor -= 1;
+                input.remove(cursor);
+                selected = 0;
+            }
+            KeyCode::Delete if cursor < input.len() => {
+                input.remove(cursor);
+                selected = 0;
+            }
+            KeyCode::Left => cursor = cursor.saturating_sub(1),
+            KeyCode::Right => cursor = (cursor + 1).min(input.len()),
+            KeyCode::Up if !suggestions.is_empty() => {
+                selected = selected.saturating_sub(1);
+            }
+            KeyCode::Down if !suggestions.is_empty() => {
+                selected = (selected + 1).min(suggestions.len() - 1);
+            }
+            KeyCode::Tab if !suggestions.is_empty() => {
+                input = suggestions[selected].name.chars().collect();
+                cursor = input.len();
+                selected = 0;
+            }
+            KeyCode::Esc if !suggestions.is_empty() => {
+                input.clear();
+                cursor = 0;
+                selected = 0;
+            }
+            KeyCode::Enter => {
+                let result = if !suggestions.is_empty() {
+                    suggestions[selected].name.to_string()
+                } else {
+                    current
+                };
+                clear_request_suggestions(stdout, previous_suggestions)?;
+                execute!(stdout, MoveToColumn(0), Clear(ClearType::CurrentLine))
+                    .map_err(|err| err.to_string())?;
+                write!(stdout, "{ACCENT}> {RESET}{result}\r\n").map_err(|err| err.to_string())?;
+                stdout.flush().map_err(|err| err.to_string())?;
+                return Ok(Some(result));
+            }
+            _ => continue,
+        }
+
+        render_request_editor(stdout, &input, cursor, selected, &mut previous_suggestions)?;
+    }
+}
+
+fn render_request_editor(
+    stdout: &mut impl Write,
+    input: &[char],
+    cursor: usize,
+    selected: usize,
+    previous_suggestions: &mut usize,
+) -> Result<(), String> {
+    let input_text = input.iter().collect::<String>();
+    let suggestions = matching_commands(&input_text);
+    let rows = (*previous_suggestions).max(suggestions.len());
+
+    execute!(stdout, MoveToColumn(0), Clear(ClearType::CurrentLine))
+        .map_err(|err| err.to_string())?;
+    write!(stdout, "{ACCENT}> {RESET}{input_text}").map_err(|err| err.to_string())?;
+
+    for index in 0..rows {
+        write!(stdout, "\r\n").map_err(|err| err.to_string())?;
+        execute!(stdout, Clear(ClearType::CurrentLine)).map_err(|err| err.to_string())?;
+        if let Some(command) = suggestions.get(index) {
+            if index == selected {
+                write!(
+                    stdout,
+                    "{ACCENT}❯ {:<18}{RESET}{DIM}{}{RESET}",
+                    command.name, command.description
+                )
+                .map_err(|err| err.to_string())?;
+            } else {
+                write!(
+                    stdout,
+                    "  {:<18}{DIM}{}{RESET}",
+                    command.name, command.description
+                )
+                .map_err(|err| err.to_string())?;
+            }
+        }
+    }
+
+    if rows > 0 {
+        execute!(stdout, MoveUp(rows as u16)).map_err(|err| err.to_string())?;
+    }
+    execute!(stdout, MoveToColumn(input_cursor_column(input, cursor)))
+        .map_err(|err| err.to_string())?;
+    stdout.flush().map_err(|err| err.to_string())?;
+    *previous_suggestions = suggestions.len();
+    Ok(())
+}
+
+fn clear_request_suggestions(
+    stdout: &mut impl Write,
+    suggestion_count: usize,
+) -> Result<(), String> {
+    for _ in 0..suggestion_count {
+        write!(stdout, "\r\n").map_err(|err| err.to_string())?;
+        execute!(stdout, Clear(ClearType::CurrentLine)).map_err(|err| err.to_string())?;
+    }
+    if suggestion_count > 0 {
+        execute!(stdout, MoveUp(suggestion_count as u16)).map_err(|err| err.to_string())?;
+    }
     Ok(())
 }
 
@@ -197,5 +347,25 @@ impl RawModeGuard {
 impl Drop for RawModeGuard {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
+    }
+}
+
+fn input_cursor_column(input: &[char], cursor: usize) -> u16 {
+    let input_width = input[..cursor]
+        .iter()
+        .map(|ch| ch.width().unwrap_or(0))
+        .sum::<usize>();
+    (2 + input_width).min(u16::MAX as usize) as u16
+}
+
+#[cfg(test)]
+mod tests {
+    use super::input_cursor_column;
+
+    #[test]
+    fn cursor_column_uses_terminal_display_width_for_chinese_input() {
+        let input = "你好".chars().collect::<Vec<_>>();
+
+        assert_eq!(input_cursor_column(&input, input.len()), 6);
     }
 }

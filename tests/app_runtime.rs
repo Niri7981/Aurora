@@ -215,82 +215,62 @@ fn model_command_reports_current_provider_and_model() {
 }
 
 #[test]
-fn model_question_is_answered_locally_without_calling_model() {
-    let mut config = test_config();
-    config.provider = "openai".to_string();
-    config.openai_model = "gpt-5.4".to_string();
-    let client = PanicClient;
-    let mut app = App::new(config, client);
-
-    let outcome = app
-        .handle_text("你现在的模型是谁？")
-        .expect("turn should succeed");
-
-    assert_eq!(
-        outcome,
-        TurnOutcome::Reply("助手> 现在是 openai 的 gpt-5.4。".to_string())
-    );
-}
-
-#[test]
-fn assistant_identity_question_is_answered_locally_without_calling_model() {
+fn resume_command_is_handled_locally_without_calling_model() {
     let config = test_config();
     let client = PanicClient;
     let mut app = App::new(config, client);
 
-    let outcome = app.handle_text("你是谁啊？").expect("turn should succeed");
+    let outcome = app.handle_text("/resume").expect("turn should succeed");
 
     assert_eq!(
         outcome,
-        TurnOutcome::Reply("助手> 我是 AuroraPulse，你的本地优先个人上下文助手。".to_string())
+        TurnOutcome::Reply("助手> 暂无可恢复的历史会话。".to_string())
     );
 }
 
 #[test]
-fn user_name_question_reads_name_from_identity_card() {
+fn identity_question_reaches_model_with_local_context() {
     let config = test_config();
     write_file(&config.identity_card_path, "# Identity Card\nName: Irin");
-    let client = PanicClient;
+    let seen_user_text = Rc::new(RefCell::new(None));
+    let client = CaptureClient {
+        response: r#"{"mode":"chat","reply":"你叫 Irin。"}"#.to_string(),
+        seen_user_text: Rc::clone(&seen_user_text),
+    };
     let mut app = App::new(config, client);
 
     let outcome = app.handle_text("我叫啥？").expect("turn should succeed");
 
     assert_eq!(outcome, TurnOutcome::Reply("助手> 你叫 Irin。".to_string()));
+    let model_input = seen_user_text
+        .borrow()
+        .clone()
+        .expect("identity question should reach the model");
+    assert!(model_input.contains("Name: Irin"));
+    assert!(model_input.contains("我叫啥？"));
 }
 
 #[test]
-fn user_name_question_reports_identity_summary_when_name_is_missing() {
+fn short_fragment_reaches_model_instead_of_local_heuristics() {
     let config = test_config();
-    write_file(
-        &config.identity_card_path,
-        "# Identity Card\nI am the owner and builder of AuroraPulse.",
-    );
-    let client = PanicClient;
-    let mut app = App::new(config, client);
-
-    let outcome = app.handle_text("我叫啥？").expect("turn should succeed");
-
-    assert_eq!(
-        outcome,
-        TurnOutcome::Reply(
-            "助手> 我还没看到你的名字；Identity Card 目前写的是：I am the owner and builder of AuroraPulse."
-                .to_string()
-        )
-    );
-}
-
-#[test]
-fn incomplete_pronoun_fragment_is_clarified_locally() {
-    let config = test_config();
-    let client = PanicClient;
+    let seen_user_text = Rc::new(RefCell::new(None));
+    let client = CaptureClient {
+        response: r#"{"mode":"clarify","clarify_question":"你想继续说什么？"}"#.to_string(),
+        seen_user_text: Rc::clone(&seen_user_text),
+    };
     let mut app = App::new(config, client);
 
     let outcome = app.handle_text("我").expect("turn should succeed");
 
     assert_eq!(
         outcome,
-        TurnOutcome::Reply("助手> 这句还没说完。你想问“我是谁”还是别的？".to_string())
+        TurnOutcome::Reply("助手> 你想继续说什么？".to_string())
     );
+    let model_input = seen_user_text
+        .borrow()
+        .clone()
+        .expect("short fragment should reach the model");
+    assert!(model_input.contains("Current user request:\n我"));
 }
 
 #[test]

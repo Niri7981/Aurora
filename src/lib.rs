@@ -1,5 +1,6 @@
 pub mod app;
 pub mod cli;
+pub mod command_palette;
 pub mod config;
 pub mod context;
 pub mod harness;

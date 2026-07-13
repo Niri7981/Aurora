@@ -218,32 +218,6 @@ pub fn compose_user_prompt(
     )
 }
 
-pub fn identity_summary(context: &LocalContext) -> Option<String> {
-    context
-        .identity_card
-        .as_ref()
-        .and_then(|document| first_useful_identity_line(&document.content))
-}
-
-pub fn identity_name(context: &LocalContext) -> Option<String> {
-    let content = &context.identity_card.as_ref()?.content;
-    for line in content.lines() {
-        let trimmed = line.trim().trim_start_matches("- ").trim();
-        if is_redacted_marker_line(trimmed) {
-            continue;
-        }
-        for prefix in ["name:", "Name:", "姓名:", "名字:"] {
-            if let Some(value) = trimmed.strip_prefix(prefix) {
-                let value = value.trim();
-                if !value.is_empty() {
-                    return Some(value.to_string());
-                }
-            }
-        }
-    }
-    None
-}
-
 fn write_template_if_missing(
     path: &Path,
     template: &str,
@@ -352,24 +326,4 @@ fn redact_for_provider(content: &str, provider_kind: ProviderKind) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-fn first_useful_identity_line(content: &str) -> Option<String> {
-    content.lines().find_map(|line| {
-        let trimmed = line.trim().trim_start_matches("- ").trim();
-        if trimmed.is_empty()
-            || trimmed.starts_with('#')
-            || trimmed.ends_with(':')
-            || is_redacted_marker_line(trimmed)
-        {
-            None
-        } else {
-            Some(trimmed.to_string())
-        }
-    })
-}
-
-fn is_redacted_marker_line(line: &str) -> bool {
-    let lower = line.to_ascii_lowercase();
-    lower.contains("private:") || lower.contains("local-only:")
 }
