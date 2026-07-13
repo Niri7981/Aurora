@@ -75,6 +75,29 @@ struct CaptureClient {
     seen_user_text: Rc<RefCell<Option<String>>>,
 }
 
+struct CatalogClient {
+    models: Vec<String>,
+}
+
+impl ChatClient for CatalogClient {
+    fn provider_name<'a>(&self, config: &'a AppConfig) -> &'a str {
+        config.provider.as_str()
+    }
+
+    fn list_models(&self, _config: &AppConfig) -> Result<Vec<String>, String> {
+        Ok(self.models.clone())
+    }
+
+    fn chat(
+        &mut self,
+        _config: &AppConfig,
+        _history: &[ChatMessage],
+        _user_text: &str,
+    ) -> Result<String, String> {
+        panic!("model selection should not call chat")
+    }
+}
+
 static TEMP_DIR_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 impl ChatClient for CaptureClient {
@@ -199,18 +222,34 @@ fn pending_tool_denial_is_handled_without_calling_model_again() {
 }
 
 #[test]
-fn model_command_reports_current_provider_and_model() {
+fn model_command_loads_catalog_and_switches_runtime_model() {
     let mut config = test_config();
     config.provider = "openai".to_string();
     config.openai_model = "gpt-5.4".to_string();
-    let client = PanicClient;
+    let client = CatalogClient {
+        models: vec!["gpt-4o-mini".to_string(), "gpt-5.4".to_string()],
+    };
     let mut app = App::new(config, client);
 
     let outcome = app.handle_text("/model").expect("turn should succeed");
 
     assert_eq!(
         outcome,
-        TurnOutcome::Reply("助手>\nProvider: openai\nModel: gpt-5.4".to_string())
+        TurnOutcome::ModelSelection {
+            current_model: "gpt-5.4".to_string(),
+            models: vec!["gpt-4o-mini".to_string(), "gpt-5.4".to_string()],
+        }
+    );
+
+    let switched = app
+        .select_model("gpt-4o-mini")
+        .expect("runtime model should switch");
+    assert_eq!(
+        switched,
+        TurnOutcome::ModelChanged {
+            model: "gpt-4o-mini".to_string(),
+            message: "助手> 已切换到 openai 的 gpt-4o-mini。".to_string(),
+        }
     );
 }
 

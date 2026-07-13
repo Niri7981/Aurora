@@ -2,7 +2,7 @@ use std::env;
 use std::io::{self, IsTerminal, Write};
 use std::path::Path;
 
-use crossterm::cursor::{MoveToColumn, MoveUp};
+use crossterm::cursor::{MoveTo, MoveToColumn, MoveUp, RestorePosition, SavePosition};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{Clear, ClearType, disable_raw_mode, enable_raw_mode};
@@ -24,16 +24,38 @@ const ACCENT: &str = "\x1b[38;5;215m";
 const MUTED: &str = "\x1b[38;5;246m";
 
 pub fn run(config: &AppConfig) -> Result<(), String> {
-    render_banner(
+    let banner = render_banner(
         Path::new(&config.workspace),
         &config.provider,
         config.active_model(),
     )
     .map_err(|err| err.to_string())?;
-    repl_loop(config)
+    repl_loop(config, &banner)
 }
 
-fn render_banner(workspace: &Path, provider: &str, model: &str) -> io::Result<()> {
+struct BannerLayout {
+    model_row: Option<u16>,
+}
+
+impl BannerLayout {
+    fn update_model(&self, stdout: &mut impl Write, model: &str) -> io::Result<()> {
+        let Some(model_row) = self.model_row else {
+            return Ok(());
+        };
+
+        execute!(
+            stdout,
+            SavePosition,
+            MoveTo(0, model_row),
+            Clear(ClearType::CurrentLine)
+        )?;
+        write!(stdout, "{MUTED}  Model     {RESET}{model}")?;
+        execute!(stdout, RestorePosition)?;
+        stdout.flush()
+    }
+}
+
+fn render_banner(workspace: &Path, provider: &str, model: &str) -> io::Result<BannerLayout> {
     let mut stdout = io::stdout();
     let width = env::var("COLUMNS")
         .ok()
@@ -46,16 +68,24 @@ fn render_banner(workspace: &Path, provider: &str, model: &str) -> io::Result<()
         && env::var_os("AURORA_NO_ANIMATION").is_none()
         && env::var("TERM").map(|term| term != "dumb").unwrap_or(true);
 
-    if should_animate {
+    let status_start_row = if should_animate {
         startup_animation::play().map_err(io::Error::other)?;
-    }
-
-    if !is_terminal || !should_animate {
+        Some(startup_animation::END_ROW)
+    } else if is_terminal {
+        execute!(stdout, Clear(ClearType::All), MoveTo(0, 0))?;
         write!(
             stdout,
             "{ACCENT}{BOLD}  {APP_NAME}{RESET}\n{DIM}  {APP_TAGLINE}{RESET}\n\n"
         )?;
-    }
+        Some(3)
+    } else {
+        write!(
+            stdout,
+            "{ACCENT}{BOLD}  {APP_NAME}{RESET}\n{DIM}  {APP_TAGLINE}{RESET}\n\n"
+        )?;
+        None
+    };
+    let model_row = status_start_row.map(|row| row.saturating_add(1));
 
     write!(
         stdout,
@@ -69,10 +99,10 @@ fn render_banner(workspace: &Path, provider: &str, model: &str) -> io::Result<()
         rule = rule
     )?;
     stdout.flush()?;
-    Ok(())
+    Ok(BannerLayout { model_row })
 }
 
-fn repl_loop(config: &AppConfig) -> Result<(), String> {
+fn repl_loop(config: &AppConfig, banner: &BannerLayout) -> Result<(), String> {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
     let mut app = App::new(config.clone(), ConfiguredChatClient);
@@ -104,6 +134,25 @@ fn repl_loop(config: &AppConfig) -> Result<(), String> {
                     Err(err) => println!("助手> 执行失败：{err}"),
                 }
             }
+            Ok(TurnOutcome::ModelSelection {
+                current_model,
+                models,
+            }) => match select_model(&current_model, &models)? {
+                Some(model) => match app.select_model(&model) {
+                    Ok(TurnOutcome::ModelChanged { model, message }) => {
+                        banner
+                            .update_model(&mut stdout, &model)
+                            .map_err(|err| format!("更新顶部模型状态失败：{err}"))?;
+                        println!("{message}");
+                    }
+                    Ok(_) => return Err("模型切换返回了无效状态".to_string()),
+                    Err(err) => println!("助手> 切换模型失败：{err}"),
+                },
+                None => println!("助手> 已取消模型切换。"),
+            },
+            Ok(TurnOutcome::ModelChanged { .. }) => {
+                return Err("模型切换结果出现在了无效的请求阶段".to_string());
+            }
             Err(err) => {
                 println!("助手> 执行失败：{err}");
             }
@@ -111,6 +160,138 @@ fn repl_loop(config: &AppConfig) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+const MODEL_MENU_SIZE: usize = 8;
+const MODEL_MENU_LINES: u16 = (MODEL_MENU_SIZE + 2) as u16;
+
+fn select_model(current_model: &str, models: &[String]) -> Result<Option<String>, String> {
+    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        return Err("/model 需要交互式终端来选择模型".to_string());
+    }
+    if models.is_empty() {
+        return Err("API 没有返回可选择的模型".to_string());
+    }
+
+    let mut stdout = io::stdout();
+    let _raw_mode = RawModeGuard::enter()?;
+    let mut filter = String::new();
+    let mut selected = models
+        .iter()
+        .position(|model| model == current_model)
+        .unwrap_or(0);
+
+    write!(stdout, "当前模型：{current_model}\r\n").map_err(|err| err.to_string())?;
+    render_model_menu(&mut stdout, models, current_model, &filter, selected, false)?;
+
+    loop {
+        let Event::Key(key) = event::read().map_err(|err| err.to_string())? else {
+            continue;
+        };
+        if key.kind != KeyEventKind::Press {
+            continue;
+        }
+
+        let filtered = filtered_models(models, &filter);
+        match key.code {
+            KeyCode::Up if !filtered.is_empty() => selected = selected.saturating_sub(1),
+            KeyCode::Down if !filtered.is_empty() => {
+                selected = (selected + 1).min(filtered.len() - 1)
+            }
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                clear_model_menu(&mut stdout)?;
+                return Ok(None);
+            }
+            KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                filter.push(ch);
+                selected = 0;
+            }
+            KeyCode::Backspace => {
+                filter.pop();
+                selected = 0;
+            }
+            KeyCode::Esc => {
+                clear_model_menu(&mut stdout)?;
+                return Ok(None);
+            }
+            KeyCode::Enter if !filtered.is_empty() => {
+                let model = filtered[selected].clone();
+                clear_model_menu(&mut stdout)?;
+                return Ok(Some(model));
+            }
+            _ => continue,
+        }
+
+        render_model_menu(&mut stdout, models, current_model, &filter, selected, true)?;
+    }
+}
+
+fn filtered_models<'a>(models: &'a [String], filter: &str) -> Vec<&'a String> {
+    let normalized_filter = filter.to_ascii_lowercase();
+    models
+        .iter()
+        .filter(|model| model.to_ascii_lowercase().contains(&normalized_filter))
+        .collect()
+}
+
+fn render_model_menu(
+    stdout: &mut impl Write,
+    models: &[String],
+    current_model: &str,
+    filter: &str,
+    selected: usize,
+    redraw: bool,
+) -> Result<(), String> {
+    if redraw {
+        execute!(stdout, MoveUp(MODEL_MENU_LINES)).map_err(|err| err.to_string())?;
+    }
+
+    execute!(stdout, Clear(ClearType::CurrentLine)).map_err(|err| err.to_string())?;
+    write!(stdout, "筛选：{filter}\r\n").map_err(|err| err.to_string())?;
+
+    let filtered = filtered_models(models, filter);
+    let selected = selected.min(filtered.len().saturating_sub(1));
+    let window_start = selected
+        .saturating_sub(MODEL_MENU_SIZE / 2)
+        .min(filtered.len().saturating_sub(MODEL_MENU_SIZE));
+
+    for row in 0..MODEL_MENU_SIZE {
+        execute!(stdout, Clear(ClearType::CurrentLine)).map_err(|err| err.to_string())?;
+        if let Some(model) = filtered.get(window_start + row) {
+            let current_marker = if model.as_str() == current_model {
+                " *"
+            } else {
+                ""
+            };
+            if window_start + row == selected {
+                write!(stdout, "{ACCENT}❯ {}{current_marker}{RESET}", model)
+                    .map_err(|err| err.to_string())?;
+            } else {
+                write!(stdout, "  {}{current_marker}", model).map_err(|err| err.to_string())?;
+            }
+        } else if row == 0 && filtered.is_empty() {
+            write!(stdout, "{DIM}  没有匹配的模型{RESET}").map_err(|err| err.to_string())?;
+        }
+        write!(stdout, "\r\n").map_err(|err| err.to_string())?;
+    }
+
+    execute!(stdout, Clear(ClearType::CurrentLine)).map_err(|err| err.to_string())?;
+    write!(
+        stdout,
+        "{DIM}输入筛选 · ↑/↓ 选择 · Enter 切换 · Esc 取消{RESET}\r\n"
+    )
+    .map_err(|err| err.to_string())?;
+    stdout.flush().map_err(|err| err.to_string())
+}
+
+fn clear_model_menu(stdout: &mut impl Write) -> Result<(), String> {
+    execute!(stdout, MoveUp(MODEL_MENU_LINES)).map_err(|err| err.to_string())?;
+    for _ in 0..MODEL_MENU_LINES {
+        execute!(stdout, Clear(ClearType::CurrentLine)).map_err(|err| err.to_string())?;
+        write!(stdout, "\r\n").map_err(|err| err.to_string())?;
+    }
+    execute!(stdout, MoveUp(MODEL_MENU_LINES)).map_err(|err| err.to_string())?;
+    stdout.flush().map_err(|err| err.to_string())
 }
 
 fn read_request(stdin: &io::Stdin, stdout: &mut io::Stdout) -> Result<Option<String>, String> {
@@ -360,12 +541,26 @@ fn input_cursor_column(input: &[char], cursor: usize) -> u16 {
 
 #[cfg(test)]
 mod tests {
-    use super::input_cursor_column;
+    use super::{BannerLayout, input_cursor_column};
 
     #[test]
     fn cursor_column_uses_terminal_display_width_for_chinese_input() {
         let input = "你好".chars().collect::<Vec<_>>();
 
         assert_eq!(input_cursor_column(&input, input.len()), 6);
+    }
+
+    #[test]
+    fn model_change_rewrites_the_banner_model_row() {
+        let banner = BannerLayout { model_row: Some(7) };
+        let mut output = Vec::new();
+
+        banner
+            .update_model(&mut output, "gpt-5.5")
+            .expect("banner update should render");
+
+        let rendered = String::from_utf8(output).expect("terminal output should be UTF-8");
+        assert!(rendered.contains("Model"));
+        assert!(rendered.contains("gpt-5.5"));
     }
 }

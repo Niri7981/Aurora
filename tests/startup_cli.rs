@@ -55,13 +55,13 @@ fn clears_session_and_exits_through_cli_commands() {
 #[test]
 fn local_slash_commands_do_not_print_thinking_line() {
     let cwd = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let output = run_aurora(&["."], "/model\n/resume\n/clear\nquit\n", cwd);
+    let output = run_aurora(&["."], "/resume\n/clear\nquit\n", cwd);
 
     assert!(output.status.success());
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Provider:"), "unexpected stdout: {stdout}");
-    assert!(stdout.contains("Model:"), "unexpected stdout: {stdout}");
+    assert!(stdout.contains("Provider"), "unexpected stdout: {stdout}");
+    assert!(stdout.contains("Model"), "unexpected stdout: {stdout}");
     assert!(
         !stdout.contains("正在思考"),
         "local commands should not show thinking: {stdout}"

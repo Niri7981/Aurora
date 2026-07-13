@@ -21,6 +21,8 @@ pub const LOGO_ASCII: [&str; 7] = [
     "██    ██╝    ██████╝    ██    ██╗  ██████╝    ██    ██╗ ██    ██╝ ",
 ];
 
+pub const END_ROW: u16 = 5 + LOGO_ASCII.len() as u16 + 5;
+
 pub fn play() -> Result<(), String> {
     install_interrupt_restore_handler()?;
     let _terminal = TerminalSession::enter().map_err(|err| err.to_string())?;
@@ -107,7 +109,7 @@ fn play_tagline_typewriter() -> io::Result<()> {
         thread::sleep(TYPEWRITER_DELAY);
     }
 
-    execute!(stdout, MoveTo(0, row + 2))?;
+    execute!(stdout, MoveTo(0, END_ROW))?;
     stdout.flush()?;
     Ok(())
 }

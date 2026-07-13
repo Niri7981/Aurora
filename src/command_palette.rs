@@ -23,7 +23,7 @@ const SLASH_COMMANDS: [SlashCommand; 6] = [
     },
     SlashCommand {
         name: "/model",
-        description: "Show the active model",
+        description: "Browse and switch models",
     },
     SlashCommand {
         name: "/resume",

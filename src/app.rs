@@ -10,7 +10,18 @@ pub enum TurnOutcome {
     Exit(String),
     Cleared(String),
     Reply(String),
-    Confirmation { tool_name: String, prompt: String },
+    Confirmation {
+        tool_name: String,
+        prompt: String,
+    },
+    ModelSelection {
+        current_model: String,
+        models: Vec<String>,
+    },
+    ModelChanged {
+        model: String,
+        message: String,
+    },
 }
 
 pub struct App<C> {
@@ -45,7 +56,11 @@ impl<C: ChatClient> App<C> {
         }
 
         if trimmed == "/model" {
-            return Ok(TurnOutcome::Reply(self.render_model_status()));
+            let models = self.client.list_models(&self.config)?;
+            return Ok(TurnOutcome::ModelSelection {
+                current_model: self.config.active_model().to_string(),
+                models,
+            });
         }
 
         if trimmed == "/resume" {
@@ -99,12 +114,22 @@ impl<C: ChatClient> App<C> {
         self.harness.resolve_confirmation(decision)
     }
 
-    fn render_model_status(&self) -> String {
-        format!(
-            "助手>\nProvider: {}\nModel: {}",
-            self.config.provider,
-            self.config.active_model()
-        )
+    pub fn select_model(&mut self, model: &str) -> Result<TurnOutcome, String> {
+        let selected = model.trim();
+        if selected.is_empty() {
+            return Err("模型 ID 不能为空".to_string());
+        }
+
+        match self.config.provider.as_str() {
+            "openai" => self.config.openai_model = selected.to_string(),
+            "ollama" => self.config.model = selected.to_string(),
+            other => return Err(format!("未知 model provider：{other}")),
+        }
+
+        Ok(TurnOutcome::ModelChanged {
+            model: selected.to_string(),
+            message: format!("助手> 已切换到 {} 的 {selected}。", self.config.provider),
+        })
     }
 }
 
