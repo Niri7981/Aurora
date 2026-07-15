@@ -8,6 +8,7 @@ pub mod model;
 pub mod planner;
 pub mod session;
 pub mod startup_animation;
+pub mod theme;
 pub mod tools;
 
 pub fn run(workspace_arg: Option<String>) -> Result<(), String> {

@@ -5,7 +5,8 @@ use std::path::Path;
 use crossterm::cursor::{MoveTo, MoveToColumn, MoveUp, RestorePosition, SavePosition};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::execute;
-use crossterm::terminal::{Clear, ClearType, disable_raw_mode, enable_raw_mode};
+use crossterm::style::{Print, ResetColor, SetBackgroundColor, SetForegroundColor};
+use crossterm::terminal::{self, Clear, ClearType, disable_raw_mode, enable_raw_mode};
 use unicode_width::UnicodeWidthChar;
 
 use crate::app::{App, TurnOutcome, should_show_thinking_indicator};
@@ -14,15 +15,10 @@ use crate::config::AppConfig;
 use crate::harness::ConfirmationDecision;
 use crate::model::ConfiguredChatClient;
 use crate::startup_animation;
+use crate::theme::{ACCENT, BOLD, DIM, LOGO_HIGHLIGHT, MUTED, PANEL_BACKGROUND, RESET};
 
 const APP_NAME: &str = "A U R O R A";
 const APP_TAGLINE: &str = "local-first assistant shell";
-const RESET: &str = "\x1b[0m";
-const DIM: &str = "\x1b[2m";
-const BOLD: &str = "\x1b[1m";
-const ACCENT: &str = "\x1b[38;5;215m";
-const MUTED: &str = "\x1b[38;5;246m";
-
 pub fn run(config: &AppConfig) -> Result<(), String> {
     let banner = render_banner(
         Path::new(&config.workspace),
@@ -34,22 +30,37 @@ pub fn run(config: &AppConfig) -> Result<(), String> {
 }
 
 struct BannerLayout {
-    model_row: Option<u16>,
+    model_location: Option<ModelLocation>,
+}
+
+enum ModelLocation {
+    Line(u16),
+    Dashboard { row: u16, col: u16, width: usize },
 }
 
 impl BannerLayout {
     fn update_model(&self, stdout: &mut impl Write, model: &str) -> io::Result<()> {
-        let Some(model_row) = self.model_row else {
+        let Some(location) = &self.model_location else {
             return Ok(());
         };
 
-        execute!(
-            stdout,
-            SavePosition,
-            MoveTo(0, model_row),
-            Clear(ClearType::CurrentLine)
-        )?;
-        write!(stdout, "{MUTED}  Model     {RESET}{model}")?;
+        execute!(stdout, SavePosition)?;
+        match location {
+            ModelLocation::Line(row) => {
+                execute!(stdout, MoveTo(0, *row), Clear(ClearType::CurrentLine))?;
+                write!(stdout, "{MUTED}  Model     {RESET}{model}")?;
+            }
+            ModelLocation::Dashboard { row, col, width } => {
+                execute!(
+                    stdout,
+                    MoveTo(*col, *row),
+                    SetBackgroundColor(PANEL_BACKGROUND),
+                    SetForegroundColor(LOGO_HIGHLIGHT),
+                    Print(startup_animation::fit_text(model, *width)),
+                    ResetColor
+                )?;
+            }
+        }
         execute!(stdout, RestorePosition)?;
         stdout.flush()
     }
@@ -66,12 +77,24 @@ fn render_banner(workspace: &Path, provider: &str, model: &str) -> io::Result<Ba
     let is_terminal = stdout.is_terminal();
     let should_animate = is_terminal
         && env::var_os("AURORA_NO_ANIMATION").is_none()
-        && env::var("TERM").map(|term| term != "dumb").unwrap_or(true);
+        && env::var("TERM").map(|term| term != "dumb").unwrap_or(true)
+        && terminal::size()
+            .map(|(terminal_width, terminal_height)| terminal_width >= 80 && terminal_height >= 23)
+            .unwrap_or(false);
 
-    let status_start_row = if should_animate {
-        startup_animation::play().map_err(io::Error::other)?;
-        Some(startup_animation::END_ROW)
-    } else if is_terminal {
+    if should_animate {
+        let layout = startup_animation::play(provider, model, &workspace.display().to_string())
+            .map_err(io::Error::other)?;
+        return Ok(BannerLayout {
+            model_location: Some(ModelLocation::Dashboard {
+                row: layout.model_row,
+                col: layout.model_col,
+                width: layout.model_width,
+            }),
+        });
+    }
+
+    let status_start_row: Option<u16> = if is_terminal {
         execute!(stdout, Clear(ClearType::All), MoveTo(0, 0))?;
         write!(
             stdout,
@@ -85,7 +108,7 @@ fn render_banner(workspace: &Path, provider: &str, model: &str) -> io::Result<Ba
         )?;
         None
     };
-    let model_row = status_start_row.map(|row| row.saturating_add(1));
+    let model_location = status_start_row.map(|row| ModelLocation::Line(row.saturating_add(1)));
 
     write!(
         stdout,
@@ -99,7 +122,7 @@ fn render_banner(workspace: &Path, provider: &str, model: &str) -> io::Result<Ba
         rule = rule
     )?;
     stdout.flush()?;
-    Ok(BannerLayout { model_row })
+    Ok(BannerLayout { model_location })
 }
 
 fn repl_loop(config: &AppConfig, banner: &BannerLayout) -> Result<(), String> {
@@ -541,7 +564,7 @@ fn input_cursor_column(input: &[char], cursor: usize) -> u16 {
 
 #[cfg(test)]
 mod tests {
-    use super::{BannerLayout, input_cursor_column};
+    use super::{BannerLayout, ModelLocation, input_cursor_column};
 
     #[test]
     fn cursor_column_uses_terminal_display_width_for_chinese_input() {
@@ -552,7 +575,9 @@ mod tests {
 
     #[test]
     fn model_change_rewrites_the_banner_model_row() {
-        let banner = BannerLayout { model_row: Some(7) };
+        let banner = BannerLayout {
+            model_location: Some(ModelLocation::Line(7)),
+        };
         let mut output = Vec::new();
 
         banner
@@ -562,5 +587,25 @@ mod tests {
         let rendered = String::from_utf8(output).expect("terminal output should be UTF-8");
         assert!(rendered.contains("Model"));
         assert!(rendered.contains("gpt-5.5"));
+    }
+
+    #[test]
+    fn model_change_rewrites_only_the_dashboard_value_field() {
+        let banner = BannerLayout {
+            model_location: Some(ModelLocation::Dashboard {
+                row: 17,
+                col: 32,
+                width: 10,
+            }),
+        };
+        let mut output = Vec::new();
+
+        banner
+            .update_model(&mut output, "gpt-5.5")
+            .expect("dashboard model update should render");
+
+        let rendered = String::from_utf8(output).expect("terminal output should be UTF-8");
+        assert!(rendered.contains("gpt-5.5  "));
+        assert!(!rendered.contains("Model"));
     }
 }
