@@ -6,7 +6,7 @@ V1 focuses on one concrete promise:
 
 > Any selected model should know who it is helping before the first useful reply, without making that personal memory belong to the model provider.
 
-The first implementation path is Rust CLI + Ollama, with the local context layer kept separate so future GPT, Claude, Gemini, or other API providers can receive a filtered context bundle later.
+The current implementation is a Rust CLI with Ollama and OpenAI-compatible providers. Local context, planner decisions, harness policy, and native tool execution remain separate so model providers never own memory or direct system control.
 
 ## V1 Shape
 
@@ -16,7 +16,10 @@ The first implementation path is Rust CLI + Ollama, with the local context layer
 - Privacy rules
 - Current project context from `CONTEXT.md`, `AGENTS.md`, or `CLAUDE.md`
 - Context bundle preview
-- Ollama as the first provider
+- Ollama and OpenAI-compatible model providers
+- Structured planner decisions and a custom harness
+- Unified native tool registry with centralized risk policy
+- Inspectable normalized tool results
 
 ## Local Identity Files
 
@@ -52,11 +55,17 @@ Inside the CLI:
 ```text
 /context init
 /context preview
+/model
+/tools
+/tools log
 ```
 
 `/context init` creates the local context files if they do not exist.
 
 `/context preview` shows the context bundle AuroraPulse will inject before calling the model.
+
+`/tools` shows the exact tool catalog injected into the planner prompt. `/tools log` shows the
+most recent normalized tool results and execution timing for the current process.
 
 Any normal request is sent to the model with local identity context prepended:
 
@@ -110,6 +119,10 @@ src/
     openai.rs
   planner.rs
   session.rs
+  startup_animation.rs
+  theme.rs
+  tools/
+    mod.rs
 tests/
   app_runtime.rs
   context_loading.rs

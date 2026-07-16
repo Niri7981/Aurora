@@ -2,7 +2,7 @@
 
 ## Current Status
 
-Phase 1 is functionally complete enough to move forward.
+Phases 1 through 3 are complete. The project is ready to begin the Phase 4 local-knowledge slice.
 
 Done:
 - Editable local identity files are defined and initialized with `/context init`.
@@ -54,7 +54,6 @@ Built:
 Do not build yet:
 - Anthropic/Gemini providers.
 - Streaming.
-- Tool execution through cloud providers.
 - Long-term memory writes.
 - Account sync.
 - MCP adapter.
@@ -96,6 +95,30 @@ Phase 2 is done when:
 Current result:
 - All criteria above are met for the OpenAI-compatible gateway path.
 - Remaining work is hardening, UX, and deciding whether to keep `curl` or move to a Rust HTTP client.
+
+## Phase 3 Custom Harness And Unified Tool Layer
+
+Status: complete.
+
+Built:
+- `App` composes local context, calls the selected provider, parses the internal planner JSON, and hands a validated `PlannerDecision` to the harness.
+- `PlannerDecision` supports bounded `chat`, `clarify`, `tool`, and `retrieve` branches.
+- `ToolRegistry` owns tool discovery, required-argument validation, risk classification, dispatch, and result normalization.
+- The planner tool catalog is generated from `ToolRegistry::specs()` for every model call; tool names and argument schemas are no longer duplicated in a provider prompt.
+- Risk policy is centralized: low-risk tools execute directly, medium-risk tools support one-time or session approval, and high-risk tools require confirmation every time.
+- Tool execution returns a normalized `ToolResult` with `succeeded`, `failed`, or `denied` status, structured data, and an optional error.
+- The harness records the latest 32 tool results with execution timing. `/tools` and `/tools log` expose the catalog and audit trail.
+- External command-backed tools have a bounded 20-second execution window and restore control on timeout.
+- Tests cover dynamic prompt injection, action validation, unknown tools, clarification, confirmation, session approval, high-risk re-confirmation, normalized failures, denials, and successful results.
+
+Acceptance result:
+- Adding a native tool only requires registering a `ToolDefinition`; the CLI loop, provider implementations, and planner prompt do not need tool-specific branches.
+- The model proposes actions through internal JSON but cannot execute tools directly.
+- Harness and tool reality remain authoritative over model claims.
+
+## Next: Phase 4 Local Knowledge
+
+The next slice is the `retrieve` branch: authorized Markdown/text discovery, source metadata, bounded retrieval, and short source-aware synthesis. PDF ingestion, web clipping, and a broad vector database remain out of scope for the first slice.
 
 ## Product Check
 
