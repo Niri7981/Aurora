@@ -131,6 +131,10 @@ tests/
   startup_cli.rs
 ```
 
+## Architecture Diagrams
+
+Phase-by-phase architecture images and reproducible Imagine 2 prompts are maintained in [docs/architecture/phase-diagrams](docs/architecture/phase-diagrams/README.md).
+
 ## Not V1
 
 - Full-disk scanning
