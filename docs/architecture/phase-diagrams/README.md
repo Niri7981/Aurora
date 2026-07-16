@@ -6,9 +6,43 @@ This directory keeps architecture images and their reproducible generation promp
 
 | Phase | Architecture focus | Image | Prompt | Status |
 | --- | --- | --- | --- | --- |
-| Phase 1 | User-owned Identity Card and auditable Context Bundle | `images/phase-1-identity-context-architecture.png` | [Phase 1 prompt](prompts/phase-1-identity-context-architecture.md) | Prompt ready; image pending |
-| Phase 2 | Provider-neutral model boundary and local/cloud context policies | `images/phase-2-model-provider-architecture.png` | [Phase 2 prompt](prompts/phase-2-model-provider-architecture.md) | Prompt ready; image pending |
+| Phase 1 | User-owned Identity Card and auditable Context Bundle | [Phase 1 image](images/phase-1-identity-context-architecture.png) | [Phase 1 prompt](prompts/phase-1-identity-context-architecture.md) | Complete |
+| Phase 2 | Provider-neutral model boundary and local/cloud context policies | [Phase 2 image](images/phase-2-model-provider-architecture.png) | [Phase 2 prompt](prompts/phase-2-model-provider-architecture.md) | Complete |
 | Phase 3 | Custom Harness, unified Tool Registry, permissions and normalized results | [Phase 3 image](images/phase-3-harness-architecture.png) | [Phase 3 prompt](prompts/phase-3-harness-architecture.md) | Complete |
+
+## Phase 1 Diagram
+
+![AuroraPulse Phase 1 Identity and Context Architecture](images/phase-1-identity-context-architecture.png)
+
+Phase 1 established the local source of truth:
+
+```text
+User-owned identity files + workspace context
+  -> Context Loader
+  -> Selective Filter
+  -> Context Bundle Composer
+  -> Preview & Audit
+  -> identity-aware first reply
+```
+
+Identity remains editable local data. AuroraPulse reads known files, exposes the resulting bundle for inspection, and does not silently mutate memory.
+
+## Phase 2 Diagram
+
+![AuroraPulse Phase 2 Model Provider Architecture](images/phase-2-model-provider-architecture.png)
+
+Phase 2 separated context ownership from model transport:
+
+```text
+Local Context Contract
+  -> Provider-Aware Context Policy
+  -> Prompt Composer
+  -> ChatClient Interface
+  -> OllamaProvider | OpenAIProvider
+  -> normalized model content
+```
+
+Local and cloud providers share one application lifecycle while receiving different privacy policies. Runtime model switching does not move identity ownership into the provider.
 
 ## Phase 3 Diagram
 
@@ -38,7 +72,7 @@ The model proposes `chat`, `clarify`, `tool`, or `retrieve`. The Harness and Too
 4. Regenerate or edit until the text is correct and no future capability appears as complete.
 5. Export a PNG without additional compression.
 6. Save it under `images/` using the exact filename listed in the catalog.
-7. Update the catalog status from `Prompt ready; image pending` to `Complete`.
+7. Update the catalog status to `Complete`.
 
 ## Visual Contract
 

@@ -135,6 +135,8 @@ tests/
 
 Phase-by-phase architecture images and reproducible Imagine 2 prompts are maintained in [docs/architecture/phase-diagrams](docs/architecture/phase-diagrams/README.md).
 
+Phase 1 through Phase 3 are complete and documented there. **Phase 4: Local Knowledge is scheduled to begin on 2026-07-18**, starting with the existing `retrieve` decision branch, authorized Markdown/text sources, and source-aware answers.
+
 ## Not V1
 
 - Full-disk scanning
