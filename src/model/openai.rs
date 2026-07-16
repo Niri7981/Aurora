@@ -6,7 +6,6 @@ use crate::config::AppConfig;
 use crate::session::ChatMessage;
 
 use super::ChatClient;
-use super::ollama::SYSTEM_PROMPT;
 
 pub(super) struct OpenAiProvider;
 
@@ -48,6 +47,7 @@ impl ChatClient for OpenAiProvider {
     fn chat(
         &mut self,
         config: &AppConfig,
+        system_prompt: &str,
         history: &[ChatMessage],
         user_text: &str,
     ) -> Result<String, String> {
@@ -56,7 +56,7 @@ impl ChatClient for OpenAiProvider {
         let endpoint = build_chat_completions_endpoint(&config.openai_base_url);
         let mut messages = vec![json!({
             "role": "system",
-            "content": SYSTEM_PROMPT
+            "content": system_prompt
         })];
 
         for message in history {

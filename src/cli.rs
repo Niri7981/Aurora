@@ -149,8 +149,12 @@ fn repl_loop(config: &AppConfig, banner: &BannerLayout) -> Result<(), String> {
             Ok(TurnOutcome::Cleared(message)) | Ok(TurnOutcome::Reply(message)) => {
                 println!("{message}");
             }
-            Ok(TurnOutcome::Confirmation { tool_name, prompt }) => {
-                let decision = select_confirmation(&prompt, &tool_name)?;
+            Ok(TurnOutcome::Confirmation {
+                tool_name,
+                prompt,
+                allow_always,
+            }) => {
+                let decision = select_confirmation(&prompt, &tool_name, allow_always)?;
                 match app.resolve_confirmation(decision) {
                     Ok(TurnOutcome::Reply(message)) => println!("{message}"),
                     Ok(_) => return Err("确认动作返回了无效状态".to_string()),
@@ -469,17 +473,25 @@ fn clear_request_suggestions(
     Ok(())
 }
 
-fn select_confirmation(prompt: &str, tool_name: &str) -> Result<ConfirmationDecision, String> {
+fn select_confirmation(
+    prompt: &str,
+    tool_name: &str,
+    allow_always: bool,
+) -> Result<ConfirmationDecision, String> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         println!("助手> {prompt}\n  No (non-interactive terminal)");
         return Ok(ConfirmationDecision::Deny);
     }
 
-    let options = [
-        "Yes".to_string(),
-        format!("Yes, and always allow {tool_name} for this session"),
-        "No".to_string(),
-    ];
+    let options = if allow_always {
+        vec![
+            "Yes".to_string(),
+            format!("Yes, and always allow {tool_name} for this session"),
+            "No".to_string(),
+        ]
+    } else {
+        vec!["Yes".to_string(), "No".to_string()]
+    };
     let mut selected = 0;
     let mut stdout = io::stdout();
     let _raw_mode = RawModeGuard::enter()?;
@@ -499,15 +511,21 @@ fn select_confirmation(prompt: &str, tool_name: &str) -> Result<ConfirmationDeci
             KeyCode::Up => selected = selected.saturating_sub(1),
             KeyCode::Down => selected = (selected + 1).min(options.len() - 1),
             KeyCode::Char('1') | KeyCode::Char('y') => selected = 0,
-            KeyCode::Char('2') | KeyCode::Char('a') => selected = 1,
-            KeyCode::Char('3') | KeyCode::Char('n') | KeyCode::Esc => selected = 2,
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => selected = 2,
+            KeyCode::Char('2') if allow_always => selected = 1,
+            KeyCode::Char('a') if allow_always => selected = 1,
+            KeyCode::Char('3') if allow_always => selected = 2,
+            KeyCode::Char('2') | KeyCode::Char('n') | KeyCode::Esc => selected = options.len() - 1,
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                selected = options.len() - 1
+            }
             KeyCode::Enter => {
                 render_confirmation_options(&mut stdout, &options, selected, true)?;
-                return Ok(match selected {
-                    0 => ConfirmationDecision::AllowOnce,
-                    1 => ConfirmationDecision::AlwaysAllow,
-                    _ => ConfirmationDecision::Deny,
+                return Ok(if selected == 0 {
+                    ConfirmationDecision::AllowOnce
+                } else if allow_always && selected == 1 {
+                    ConfirmationDecision::AlwaysAllow
+                } else {
+                    ConfirmationDecision::Deny
                 });
             }
             _ => continue,
@@ -519,7 +537,7 @@ fn select_confirmation(prompt: &str, tool_name: &str) -> Result<ConfirmationDeci
 
 fn render_confirmation_options(
     stdout: &mut impl Write,
-    options: &[String; 3],
+    options: &[String],
     selected: usize,
     redraw: bool,
 ) -> Result<(), String> {

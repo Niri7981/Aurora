@@ -2,7 +2,7 @@ use crate::config::AppConfig;
 use crate::context;
 use crate::harness::{ConfirmationDecision, Harness};
 use crate::model::ChatClient;
-use crate::planner::PlannerDecision;
+use crate::planner::{PlannerDecision, build_system_prompt};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum TurnOutcome {
@@ -13,6 +13,7 @@ pub enum TurnOutcome {
     Confirmation {
         tool_name: String,
         prompt: String,
+        allow_always: bool,
     },
     ModelSelection {
         current_model: String,
@@ -69,6 +70,20 @@ impl<C: ChatClient> App<C> {
             ));
         }
 
+        if trimmed == "/tools" {
+            return Ok(TurnOutcome::Reply(format!(
+                "助手>\n{}",
+                self.harness.tool_catalog()
+            )));
+        }
+
+        if trimmed == "/tools log" {
+            return Ok(TurnOutcome::Reply(format!(
+                "助手>\n{}",
+                self.harness.render_tool_logs()
+            )));
+        }
+
         if trimmed == "/context" || trimmed.starts_with("/context preview") {
             let local_context = context::load(&self.config)?;
             let preview_provider = trimmed
@@ -99,9 +114,13 @@ impl<C: ChatClient> App<C> {
             self.config.active_model(),
             trimmed,
         );
-        let planner_json =
-            self.client
-                .chat(&self.config, self.harness.history(), &model_user_text)?;
+        let system_prompt = build_system_prompt(&self.harness.tool_catalog());
+        let planner_json = self.client.chat(
+            &self.config,
+            &system_prompt,
+            self.harness.history(),
+            &model_user_text,
+        )?;
         let decision = PlannerDecision::parse(&planner_json)?;
 
         self.harness.handle_decision(trimmed, decision)

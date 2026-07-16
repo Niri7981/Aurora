@@ -4,7 +4,7 @@ pub struct SlashCommand {
     pub description: &'static str,
 }
 
-const SLASH_COMMANDS: [SlashCommand; 6] = [
+const SLASH_COMMANDS: [SlashCommand; 8] = [
     SlashCommand {
         name: "/clear",
         description: "Clear the current session",
@@ -29,6 +29,14 @@ const SLASH_COMMANDS: [SlashCommand; 6] = [
         name: "/resume",
         description: "Resume a saved session",
     },
+    SlashCommand {
+        name: "/tools",
+        description: "Inspect the active tool catalog",
+    },
+    SlashCommand {
+        name: "/tools log",
+        description: "Inspect recent tool results",
+    },
 ];
 
 pub fn slash_commands() -> &'static [SlashCommand] {
@@ -52,7 +60,7 @@ mod tests {
 
     #[test]
     fn slash_lists_all_commands() {
-        assert_eq!(matching_commands("/").len(), 6);
+        assert_eq!(matching_commands("/").len(), 8);
     }
 
     #[test]

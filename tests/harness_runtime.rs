@@ -2,8 +2,8 @@ use aurora::app::TurnOutcome;
 use aurora::harness::{ConfirmationDecision, Harness};
 use aurora::planner::PlannerDecision;
 use aurora::tools::{
-    ArgumentKind, RequiredArgument, ToolConfirmation, ToolDefinition, ToolOutcome, ToolRegistry,
-    ToolResult, ToolRisk, ToolSpec,
+    ArgumentKind, RequiredArgument, ToolDefinition, ToolRegistry, ToolResult, ToolRisk, ToolSpec,
+    ToolStatus,
 };
 use serde_json::{Value, json};
 
@@ -21,37 +21,47 @@ fn fake_confirmation_registry() -> ToolRegistry {
             risk: ToolRisk::Medium,
             required_arguments: &FAKE_REQUIRED_ARGUMENTS,
         },
-        request_fake_confirmation,
         execute_fake_confirmation,
+        fake_confirmation_prompt,
     ));
     registry
 }
 
-fn request_fake_confirmation(arguments: &Value) -> Result<ToolOutcome, String> {
-    let target = arguments
-        .get("target")
-        .and_then(Value::as_str)
-        .expect("target should be validated before handler runs");
-
-    Ok(ToolOutcome::NeedsConfirmation(ToolConfirmation {
-        tool_name: "test.confirmed_action".to_string(),
-        risk: ToolRisk::Medium,
-        prompt: format!("执行 {target} 需要确认。"),
-        data: json!({ "target": target }),
-    }))
+fn fake_high_risk_registry() -> ToolRegistry {
+    let mut registry = ToolRegistry::new();
+    registry.register(ToolDefinition::with_confirmation(
+        ToolSpec {
+            name: "test.high_risk_action",
+            description: "Test high-risk action.",
+            risk: ToolRisk::High,
+            required_arguments: &FAKE_REQUIRED_ARGUMENTS,
+        },
+        execute_fake_confirmation,
+        fake_confirmation_prompt,
+    ));
+    registry
 }
 
-fn execute_fake_confirmation(arguments: &Value) -> Result<ToolOutcome, String> {
+fn fake_confirmation_prompt(arguments: &Value) -> String {
     let target = arguments
         .get("target")
         .and_then(Value::as_str)
         .expect("target should be validated before handler runs");
 
-    Ok(ToolOutcome::Completed(ToolResult {
-        tool_name: "test.confirmed_action".to_string(),
-        summary: format!("已执行 {target}。"),
-        data: json!({ "target": target }),
-    }))
+    format!("执行 {target} 需要确认。")
+}
+
+fn execute_fake_confirmation(arguments: &Value) -> Result<ToolResult, String> {
+    let target = arguments
+        .get("target")
+        .and_then(Value::as_str)
+        .expect("target should be validated before handler runs");
+
+    Ok(ToolResult::succeeded(
+        "test.confirmed_action",
+        format!("已执行 {target}。"),
+        json!({ "target": target }),
+    ))
 }
 
 #[test]
@@ -113,6 +123,7 @@ fn tool_decision_is_routed_through_tool_registry() {
         TurnOutcome::Confirmation {
             tool_name: "local_launch.open_app".to_string(),
             prompt: "打开 Spotify 是一个本地启动动作，需要你确认。".to_string(),
+            allow_always: true,
         }
     );
 }
@@ -136,6 +147,7 @@ fn allow_once_executes_pending_tool() {
         TurnOutcome::Confirmation {
             tool_name: "test.confirmed_action".to_string(),
             prompt: "执行 测试动作 需要确认。".to_string(),
+            allow_always: true,
         }
     );
 
@@ -147,6 +159,8 @@ fn allow_once_executes_pending_tool() {
         confirmed,
         TurnOutcome::Reply("助手> 已执行 测试动作。".to_string())
     );
+    assert_eq!(harness.tool_logs().len(), 1);
+    assert_eq!(harness.tool_logs()[0].result.status, ToolStatus::Succeeded);
 }
 
 #[test]
@@ -168,6 +182,7 @@ fn deny_cancels_pending_tool() {
         .expect("cancellation should succeed");
 
     assert_eq!(cancelled, TurnOutcome::Reply("助手> 已取消。".to_string()));
+    assert_eq!(harness.tool_logs()[0].result.status, ToolStatus::Denied);
     assert!(
         harness
             .resolve_confirmation(ConfirmationDecision::AllowOnce)
@@ -214,6 +229,50 @@ fn always_allow_skips_future_confirmation_for_the_same_tool() {
 }
 
 #[test]
+fn high_risk_tool_never_receives_a_session_bypass() {
+    let mut harness = Harness::with_tool_registry(fake_high_risk_registry());
+
+    let first = harness
+        .handle_decision(
+            "执行高风险动作",
+            PlannerDecision::Tool {
+                tool_name: "test.high_risk_action".to_string(),
+                arguments: json!({ "target": "第一次" }),
+            },
+        )
+        .expect("high-risk decision should be handled");
+    assert_eq!(
+        first,
+        TurnOutcome::Confirmation {
+            tool_name: "test.high_risk_action".to_string(),
+            prompt: "执行 第一次 需要确认。".to_string(),
+            allow_always: false,
+        }
+    );
+
+    harness
+        .resolve_confirmation(ConfirmationDecision::AlwaysAllow)
+        .expect("the current high-risk action may still be approved once");
+
+    let second = harness
+        .handle_decision(
+            "再次执行高风险动作",
+            PlannerDecision::Tool {
+                tool_name: "test.high_risk_action".to_string(),
+                arguments: json!({ "target": "第二次" }),
+            },
+        )
+        .expect("second high-risk decision should be handled");
+    assert!(matches!(
+        second,
+        TurnOutcome::Confirmation {
+            allow_always: false,
+            ..
+        }
+    ));
+}
+
+#[test]
 fn invalid_tool_arguments_become_bounded_failure_reply() {
     let mut harness = Harness::new();
 
@@ -233,6 +292,8 @@ fn invalid_tool_arguments_become_bounded_failure_reply() {
             "助手> 我没法执行这个工具请求：local_launch.open_app 缺少参数：app_name".to_string()
         )
     );
+    assert_eq!(harness.tool_logs()[0].result.status, ToolStatus::Failed);
+    assert!(harness.tool_logs()[0].result.error.is_some());
 }
 
 #[test]

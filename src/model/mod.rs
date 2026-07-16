@@ -17,6 +17,7 @@ pub trait ChatClient {
     fn chat(
         &mut self,
         config: &AppConfig,
+        system_prompt: &str,
         history: &[ChatMessage],
         user_text: &str,
     ) -> Result<String, String>;
@@ -42,12 +43,13 @@ impl ChatClient for ConfiguredChatClient {
     fn chat(
         &mut self,
         config: &AppConfig,
+        system_prompt: &str,
         history: &[ChatMessage],
         user_text: &str,
     ) -> Result<String, String> {
         match config.provider.as_str() {
-            "ollama" => OllamaProvider.chat(config, history, user_text),
-            "openai" => OpenAiProvider.chat(config, history, user_text),
+            "ollama" => OllamaProvider.chat(config, system_prompt, history, user_text),
+            "openai" => OpenAiProvider.chat(config, system_prompt, history, user_text),
             other => Err(format!(
                 "unknown AURORA_PROVIDER `{other}`; expected `ollama` or `openai`"
             )),

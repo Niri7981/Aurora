@@ -1,15 +1,19 @@
 use crate::app::TurnOutcome;
 use crate::planner::PlannerDecision;
 use crate::session::{ChatMessage, Session};
-use crate::tools::{ToolConfirmation, ToolOutcome, ToolRegistry};
+use crate::tools::{ToolConfirmation, ToolOutcome, ToolRegistry, ToolResult, ToolRisk};
 use serde_json::Value;
 use std::collections::HashSet;
+use std::time::Instant;
+
+const MAX_TOOL_LOGS: usize = 32;
 
 pub struct Harness {
     session: Session,
     tools: ToolRegistry,
     pending_tool: Option<PendingToolAction>,
     always_allowed_tools: HashSet<String>,
+    tool_logs: Vec<ToolInvocationLog>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -17,6 +21,13 @@ struct PendingToolAction {
     user_text: String,
     tool_name: String,
     arguments: Value,
+    risk: ToolRisk,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ToolInvocationLog {
+    pub result: ToolResult,
+    pub elapsed_ms: u128,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -37,6 +48,7 @@ impl Harness {
             tools,
             pending_tool: None,
             always_allowed_tools: HashSet::new(),
+            tool_logs: Vec::new(),
         }
     }
 
@@ -49,6 +61,35 @@ impl Harness {
         self.session.history()
     }
 
+    pub fn tool_catalog(&self) -> String {
+        self.tools.planner_catalog()
+    }
+
+    pub fn tool_logs(&self) -> &[ToolInvocationLog] {
+        &self.tool_logs
+    }
+
+    pub fn render_tool_logs(&self) -> String {
+        if self.tool_logs.is_empty() {
+            return "暂无工具调用记录。".to_string();
+        }
+
+        self.tool_logs
+            .iter()
+            .rev()
+            .map(|entry| {
+                format!(
+                    "{}  {:<9}  {:>4}ms  {}",
+                    entry.result.tool_name,
+                    entry.result.status,
+                    entry.elapsed_ms,
+                    entry.result.summary
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     pub fn resolve_confirmation(
         &mut self,
         decision: ConfirmationDecision,
@@ -59,21 +100,17 @@ impl Harness {
             .ok_or_else(|| "当前没有等待确认的工具动作".to_string())?;
 
         if decision == ConfirmationDecision::Deny {
-            let reply = "已取消。".to_string();
-            self.session.push_turn(&pending.user_text, &reply);
-            return Ok(TurnOutcome::Reply(format!("助手> {reply}")));
+            let result = ToolResult::denied(pending.tool_name, pending.arguments);
+            return Ok(self.finish_tool_result(&pending.user_text, result, 0));
         }
 
-        if decision == ConfirmationDecision::AlwaysAllow {
+        if decision == ConfirmationDecision::AlwaysAllow && pending.risk.allows_session_bypass() {
             self.always_allowed_tools.insert(pending.tool_name.clone());
         }
 
-        let reply = match self.tools.confirm(&pending.tool_name, pending.arguments) {
-            Ok(result) => result.summary,
-            Err(err) => format!("执行失败：{err}"),
-        };
-        self.session.push_turn(&pending.user_text, &reply);
-        Ok(TurnOutcome::Reply(format!("助手> {reply}")))
+        let started = Instant::now();
+        let result = self.tools.confirm(&pending.tool_name, pending.arguments);
+        Ok(self.finish_tool_result(&pending.user_text, result, started.elapsed().as_millis()))
     }
 
     pub fn handle_decision(
@@ -93,39 +130,61 @@ impl Harness {
             PlannerDecision::Tool {
                 tool_name,
                 arguments,
-            } => match self.tools.invoke(&tool_name, arguments) {
-                Ok(ToolOutcome::Completed(result)) => {
-                    self.session.push_turn(user_text, &result.summary);
-                    Ok(TurnOutcome::Reply(format!("助手> {}", result.summary)))
-                }
-                Ok(ToolOutcome::NeedsConfirmation(confirmation)) => {
-                    if self.always_allowed_tools.contains(&confirmation.tool_name) {
-                        let reply = match self
-                            .tools
-                            .confirm(&confirmation.tool_name, confirmation.data)
+            } => {
+                let started = Instant::now();
+                match self.tools.invoke(&tool_name, arguments) {
+                    ToolOutcome::Completed(result) => Ok(self.finish_tool_result(
+                        user_text,
+                        result,
+                        started.elapsed().as_millis(),
+                    )),
+                    ToolOutcome::NeedsConfirmation(confirmation) => {
+                        if confirmation.risk.allows_session_bypass()
+                            && self.always_allowed_tools.contains(&confirmation.tool_name)
                         {
-                            Ok(result) => result.summary,
-                            Err(err) => format!("执行失败：{err}"),
-                        };
-                        self.session.push_turn(user_text, &reply);
-                        return Ok(TurnOutcome::Reply(format!("助手> {reply}")));
-                    }
+                            let started = Instant::now();
+                            let result = self
+                                .tools
+                                .confirm(&confirmation.tool_name, confirmation.data);
+                            return Ok(self.finish_tool_result(
+                                user_text,
+                                result,
+                                started.elapsed().as_millis(),
+                            ));
+                        }
 
-                    let tool_name = confirmation.tool_name.clone();
-                    let prompt = confirmation.prompt.clone();
-                    self.pending_tool = Some(PendingToolAction::new(user_text, confirmation));
-                    Ok(TurnOutcome::Confirmation { tool_name, prompt })
+                        let tool_name = confirmation.tool_name.clone();
+                        let prompt = confirmation.prompt.clone();
+                        let allow_always = confirmation.risk.allows_session_bypass();
+                        self.pending_tool = Some(PendingToolAction::new(user_text, confirmation));
+                        Ok(TurnOutcome::Confirmation {
+                            tool_name,
+                            prompt,
+                            allow_always,
+                        })
+                    }
                 }
-                Err(err) => {
-                    let reply = format!("我没法执行这个工具请求：{err}");
-                    self.session.push_turn(user_text, &reply);
-                    Ok(TurnOutcome::Reply(format!("助手> {reply}")))
-                }
-            },
+            }
             PlannerDecision::Retrieve { retrieve_query } => Ok(TurnOutcome::Reply(format!(
                 "助手> 本地检索还没有接入执行层：{retrieve_query}"
             ))),
         }
+    }
+
+    fn finish_tool_result(
+        &mut self,
+        user_text: &str,
+        result: ToolResult,
+        elapsed_ms: u128,
+    ) -> TurnOutcome {
+        let reply = result.summary.clone();
+        self.session.push_turn(user_text, &reply);
+        self.tool_logs
+            .push(ToolInvocationLog { result, elapsed_ms });
+        if self.tool_logs.len() > MAX_TOOL_LOGS {
+            self.tool_logs.remove(0);
+        }
+        TurnOutcome::Reply(format!("助手> {reply}"))
     }
 }
 
@@ -135,6 +194,7 @@ impl PendingToolAction {
             user_text: user_text.to_string(),
             tool_name: confirmation.tool_name,
             arguments: confirmation.data,
+            risk: confirmation.risk,
         }
     }
 }

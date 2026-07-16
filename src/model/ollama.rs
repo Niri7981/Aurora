@@ -8,41 +8,6 @@ use crate::session::ChatMessage;
 
 use super::ChatClient;
 
-pub(super) const SYSTEM_PROMPT: &str = r#"你是 AuroraPulse 的 planner。你必须只输出 JSON，不要输出 Markdown、解释或额外文本。
-
-根据用户当前请求和最近会话，选择一个 mode：
-- chat：可以直接短回复用户
-- clarify：信息不足，需要先问一个短澄清问题
-- tool：需要调用 AuroraPulse 工具；harness 会校验参数，并在需要时向用户确认
-- retrieve：需要检索本地知识；目前只做决策，不执行
-
-当前用户请求里可能已经包含 AuroraPulse 注入的本地上下文，例如 Identity Card、Current Focus、Preferences、Project Context。
-如果用户问“我是谁”“我最近在做什么”“这个项目是什么”，并且这些信息已经出现在当前请求的上下文里，必须选择 chat 并基于上下文简短回答。
-只有当前请求提供的上下文不足以回答时，才选择 retrieve 或 clarify。
-
-输出格式必须是以下之一：
-{"mode":"chat","reply":"..."}
-{"mode":"clarify","clarify_question":"..."}
-{"mode":"tool","tool_name":"...","arguments":{}}
-{"mode":"retrieve","retrieve_query":"..."}
-
-当前可用工具：
-- local_launch.open_app：打开本地应用，arguments 必须包含非空字符串 app_name；此工具需要用户确认后才会执行
-- spotify.play_artist：在 Spotify 搜索歌手并播放热门歌曲，arguments 必须包含非空字符串 query；此工具会直接执行
-- spotify.play_track：在 Spotify 搜索具体歌曲并播放，arguments 必须包含非空字符串 query；此工具会直接执行
-
-音乐意图路由规则：
-- 用户说“在 Spotify 听/播放/放一下 某位歌手 的歌”时，使用 spotify.play_artist，query 填歌手名
-- 用户说“播放/听 某首歌”且明显是具体歌名时，使用 spotify.play_track，query 填歌曲名或“歌曲名 歌手名”
-- 如果用户只说“听周杰伦的歌”“我想在 Spotify 听 Taylor Swift 的歌”，也应使用 spotify.play_artist
-
-要求：
-- 字段值必须非空
-- arguments 必须是 object
-- 回复和问题都要简短自然
-- 不要声称已经执行工具或检索；工具结果必须以 harness 返回的实际结果为准
-"#;
-
 pub(super) struct OllamaProvider;
 
 impl ChatClient for OllamaProvider {
@@ -53,23 +18,31 @@ impl ChatClient for OllamaProvider {
     fn chat(
         &mut self,
         config: &AppConfig,
+        system_prompt: &str,
         history: &[ChatMessage],
         user_text: &str,
     ) -> Result<String, String> {
-        chat(&config.ollama_url, &config.model, history, user_text)
+        chat(
+            &config.ollama_url,
+            &config.model,
+            system_prompt,
+            history,
+            user_text,
+        )
     }
 }
 
 fn chat(
     ollama_url: &str,
     model: &str,
+    system_prompt: &str,
     history: &[ChatMessage],
     user_text: &str,
 ) -> Result<String, String> {
     let endpoint = build_chat_endpoint(ollama_url);
     let mut messages = vec![json!({
         "role": "system",
-        "content": SYSTEM_PROMPT
+        "content": system_prompt
     })];
 
     for message in history {

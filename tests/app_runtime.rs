@@ -21,6 +21,7 @@ impl ChatClient for PanicClient {
     fn chat(
         &mut self,
         _config: &AppConfig,
+        _system_prompt: &str,
         _history: &[ChatMessage],
         _user_text: &str,
     ) -> Result<String, String> {
@@ -44,6 +45,7 @@ impl ChatClient for JsonClient {
     fn chat(
         &mut self,
         _config: &AppConfig,
+        _system_prompt: &str,
         _history: &[ChatMessage],
         _user_text: &str,
     ) -> Result<String, String> {
@@ -59,6 +61,7 @@ impl ChatClient for QueueClient {
     fn chat(
         &mut self,
         _config: &AppConfig,
+        _system_prompt: &str,
         _history: &[ChatMessage],
         _user_text: &str,
     ) -> Result<String, String> {
@@ -79,6 +82,10 @@ struct CatalogClient {
     models: Vec<String>,
 }
 
+struct PromptCaptureClient {
+    seen_system_prompt: Rc<RefCell<Option<String>>>,
+}
+
 impl ChatClient for CatalogClient {
     fn provider_name<'a>(&self, config: &'a AppConfig) -> &'a str {
         config.provider.as_str()
@@ -91,10 +98,28 @@ impl ChatClient for CatalogClient {
     fn chat(
         &mut self,
         _config: &AppConfig,
+        _system_prompt: &str,
         _history: &[ChatMessage],
         _user_text: &str,
     ) -> Result<String, String> {
         panic!("model selection should not call chat")
+    }
+}
+
+impl ChatClient for PromptCaptureClient {
+    fn provider_name<'a>(&self, _config: &'a AppConfig) -> &'a str {
+        "ollama"
+    }
+
+    fn chat(
+        &mut self,
+        _config: &AppConfig,
+        system_prompt: &str,
+        _history: &[ChatMessage],
+        _user_text: &str,
+    ) -> Result<String, String> {
+        *self.seen_system_prompt.borrow_mut() = Some(system_prompt.to_string());
+        Ok(r#"{"mode":"chat","reply":"ok"}"#.to_string())
     }
 }
 
@@ -108,6 +133,7 @@ impl ChatClient for CaptureClient {
     fn chat(
         &mut self,
         _config: &AppConfig,
+        _system_prompt: &str,
         _history: &[ChatMessage],
         user_text: &str,
     ) -> Result<String, String> {
@@ -185,6 +211,44 @@ fn model_planner_json_is_routed_through_harness() {
 }
 
 #[test]
+fn registered_tool_catalog_is_injected_into_the_planner_prompt() {
+    let config = test_config();
+    let seen_system_prompt = Rc::new(RefCell::new(None));
+    let client = PromptCaptureClient {
+        seen_system_prompt: Rc::clone(&seen_system_prompt),
+    };
+    let mut app = App::new(config, client);
+
+    app.handle_text("打开 Safari")
+        .expect("planner call should succeed");
+
+    let prompt = seen_system_prompt
+        .borrow()
+        .clone()
+        .expect("system prompt should be captured");
+    assert!(prompt.contains("由 ToolRegistry 生成"));
+    assert!(prompt.contains("local_launch.open_app"));
+    assert!(prompt.contains("app_name"));
+    assert!(prompt.contains("spotify.play_track"));
+}
+
+#[test]
+fn tools_and_tool_logs_are_local_inspection_commands() {
+    let config = test_config();
+    let client = PanicClient;
+    let mut app = App::new(config, client);
+
+    let catalog = app.handle_text("/tools").expect("catalog should render");
+    assert!(matches!(catalog, TurnOutcome::Reply(text) if text.contains("local_launch.open_app")));
+
+    let logs = app.handle_text("/tools log").expect("logs should render");
+    assert_eq!(
+        logs,
+        TurnOutcome::Reply("助手>\n暂无工具调用记录。".to_string())
+    );
+}
+
+#[test]
 fn pending_tool_denial_is_handled_without_calling_model_again() {
     let config = test_config();
     let responses = Rc::new(RefCell::new(vec![
@@ -208,6 +272,7 @@ fn pending_tool_denial_is_handled_without_calling_model_again() {
         TurnOutcome::Confirmation {
             tool_name: "local_launch.open_app".to_string(),
             prompt: "打开 Safari 是一个本地启动动作，需要你确认。".to_string(),
+            allow_always: true,
         }
     );
 
