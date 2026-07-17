@@ -1,5 +1,7 @@
 # AuroraPulse
 
+**English** | [简体中文](README.zh-CN.md)
+
 AuroraPulse is a local-first personal context and assistant runtime.
 
 V1 focuses on one concrete promise:
@@ -135,7 +137,25 @@ tests/
 
 Phase-by-phase architecture images and reproducible Imagine 2 prompts are maintained in [docs/architecture/phase-diagrams](docs/architecture/phase-diagrams/README.md).
 
-Phase 1 through Phase 3 are complete and documented there. **Phase 4: Local Knowledge is scheduled to begin on 2026-07-18**, starting with the existing `retrieve` decision branch, authorized Markdown/text sources, and source-aware answers.
+### Phase 1: Identity & Context
+
+![AuroraPulse Phase 1 Identity and Context Architecture](docs/architecture/phase-diagrams/images/phase-1-identity-context-architecture.png)
+
+Phase 1 establishes user-owned identity files, selective local context loading, an auditable Context Bundle, and identity-aware first replies.
+
+### Phase 2: Model Providers
+
+![AuroraPulse Phase 2 Model Provider Architecture](docs/architecture/phase-diagrams/images/phase-2-model-provider-architecture.png)
+
+Phase 2 adds a provider-neutral model boundary, provider-aware context filtering, Ollama and OpenAI-compatible adapters, and runtime model selection.
+
+### Phase 3: Harness Runtime
+
+![AuroraPulse Phase 3 Harness Architecture](docs/architecture/phase-diagrams/images/phase-3-harness-architecture.png)
+
+Phase 3 completes the structured planner, custom Harness, unified Tool Registry, centralized permission policy, normalized tool results, bounded execution, and inspectable logs.
+
+Phase 1 through Phase 3 are complete. **Phase 4: Local Knowledge is scheduled to begin on 2026-07-18**, starting with the existing `retrieve` decision branch, authorized Markdown/text sources, and source-aware answers.
 
 ## Not V1
 
