@@ -2,7 +2,13 @@
 
 ## Current Status
 
-Phases 1 through 3 are complete. The project is ready to begin the Phase 4 local-knowledge slice.
+Phases 1 through 4 are complete. The project is ready to begin the Phase 5 durable-personal-memory slice.
+
+Product north star:
+
+> Tell Aurora once. Every AI you authorize can know you.
+
+AuroraPulse is positioned as a local identity and memory layer for AI agents, not as another general chat agent. The existing CLI, context loader, provider adapters, planner, harness, and tool registry are the trusted foundation. Phase 4 proved that a fresh Codex task can obtain a scoped, source-aware Context Pack from Aurora through a read-only local MCP connection.
 
 Done:
 - Editable local identity files are defined and initialized with `/context init`.
@@ -116,12 +122,35 @@ Acceptance result:
 - The model proposes actions through internal JSON but cannot execute tools directly.
 - Harness and tool reality remain authoritative over model claims.
 
-## Next: Phase 4 Local Knowledge
+## Phase 4 MCP Identity Server
 
-The next slice is the `retrieve` branch: authorized Markdown/text discovery, source metadata, bounded retrieval, and short source-aware synthesis. PDF ingestion, web clipping, and a broad vector database remain out of scope for the first slice.
+Status: complete and verified with Codex on 2026-07-18.
+
+Built:
+
+- `aurora serve [workspace]` local stdio MCP entrypoint.
+- Read-only `get_identity`, `get_current_focus`, and `search_personal_context` tools.
+- Structured Context Packs with stable source URIs and omission metadata.
+- Dynamic redaction markers from `privacy-rules.json`.
+- Read-only, non-destructive, idempotent, closed-world tool annotations.
+- Local JSONL audit log plus the `/mcp log` inspection command.
+- Global Codex MCP registration using the release Aurora binary.
+
+Acceptance result:
+
+- A fresh Codex task started in an empty, read-only directory with no copied identity prompt.
+- Codex discovered and called both identity and current-focus tools.
+- Aurora returned `aurora://identity-card.md` and `aurora://current-focus.md` after filtering sensitive lines.
+- Codex answered from those sources without reading workspace files.
+
+## Next: Phase 5 Durable Personal Memory
+
+The next slice adds durable facts, episodes, and open threads with source history, correction, deletion, and relevant-memory retrieval. Agents remain read-only; Agent-proposed memory writes belong to Phase 6.
+
+Generic Markdown/PDF retrieval, web clipping, vector databases, and voice remain deferred.
 
 ## Product Check
 
-If the OpenAI path works, the key product claim becomes demonstrable:
+The key product claim becomes demonstrable when an external Agent can safely reuse Aurora's local context:
 
-> A stateless API model can feel account-aware because AuroraPulse locally supplies the user's editable identity context before the first reply.
+> Tell Aurora once. Every AI you authorize can know you.

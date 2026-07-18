@@ -2,15 +2,17 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-AuroraPulse is a local-first personal context and assistant runtime.
+AuroraPulse is a local identity and memory layer for AI agents.
 
-V1 focuses on one concrete promise:
+Its product north star is:
 
-> Any selected model should know who it is helping before the first useful reply, without making that personal memory belong to the model provider.
+> Tell Aurora once. Every AI you authorize can know you.
 
-The current implementation is a Rust CLI with Ollama and OpenAI-compatible providers. Local context, planner decisions, harness policy, and native tool execution remain separate so model providers never own memory or direct system control.
+Aurora keeps a user-owned source of truth on the local machine and will expose only the context an authorized AI needs for the current task. Identity, current focus, preferences, memory, and disclosure policy belong to Aurora and the user rather than to any model provider.
 
-## V1 Shape
+The current implementation is the Rust foundation for that product: a CLI with editable local context, Ollama and OpenAI-compatible providers, structured planner decisions, a custom harness, and permission-controlled native tools. Phase 4 adds the first external product boundary: a read-only local MCP server that lets authorized agents request scoped Context Packs.
+
+## Current Foundation
 
 - Editable identity card
 - Current focus file
@@ -22,6 +24,22 @@ The current implementation is a Rust CLI with Ollama and OpenAI-compatible provi
 - Structured planner decisions and a custom harness
 - Unified native tool registry with centralized risk policy
 - Inspectable normalized tool results
+- Read-only local MCP identity server with structured Context Packs
+- Dynamic redaction markers and local MCP access audit logs
+
+## MCP Identity Server
+
+Phase 4 turns the existing local context layer into an MCP identity service for other agents. The slice stays intentionally small:
+
+- A local stdio MCP server
+- Read-only identity, current-focus, and personal-context tools
+- Task-scoped Context Packs with source metadata
+- Minimum-necessary disclosure and explicit sensitive-data boundaries
+- An end-to-end Codex integration proving that a new task can know the user without repeated setup
+
+The end-to-end flow was verified with a fresh Codex task on 2026-07-18. Codex discovered and called `get_identity` and `get_current_focus`, then answered from `aurora://identity-card.md` and `aurora://current-focus.md` without reading workspace files.
+
+Long-term memory writes, broad document ingestion, and voice remain deferred until the read-only cross-agent identity flow has more real usage.
 
 ## Local Identity Files
 
@@ -58,6 +76,7 @@ Inside the CLI:
 /context init
 /context preview
 /model
+/mcp log
 /tools
 /tools log
 ```
@@ -69,11 +88,30 @@ Inside the CLI:
 `/tools` shows the exact tool catalog injected into the planner prompt. `/tools log` shows the
 most recent normalized tool results and execution timing for the current process.
 
+`/mcp log` shows recent external Agent context access, including the client, tool, returned source URIs, and redaction count.
+
 Any normal request is sent to the model with local identity context prepended:
 
 ```text
 我下一步应该做什么？
 ```
+
+To run Aurora as a local MCP server:
+
+```bash
+cargo build --release
+./target/release/aurora serve .
+```
+
+To register that release binary with Codex:
+
+```bash
+codex mcp add aurora \
+  --env AURORA_MCP_CLIENT=codex \
+  -- "$(pwd)/target/release/aurora" serve "$(pwd)"
+```
+
+The stdio server exposes three read-only tools: `get_identity`, `get_current_focus`, and `search_personal_context`.
 
 ## Environment
 
@@ -155,12 +193,12 @@ Phase 2 adds a provider-neutral model boundary, provider-aware context filtering
 
 Phase 3 completes the structured planner, custom Harness, unified Tool Registry, centralized permission policy, normalized tool results, bounded execution, and inspectable logs.
 
-Phase 1 through Phase 3 are complete. **Phase 4: Local Knowledge is scheduled to begin on 2026-07-18**, starting with the existing `retrieve` decision branch, authorized Markdown/text sources, and source-aware answers.
+Phase 1 through Phase 4 are complete. **Phase 4: MCP Identity Server was verified with Codex on 2026-07-18.** The next phase is durable, user-correctable personal memory.
 
 ## Not V1
 
 - Full-disk scanning
 - Automatic long-term memory
 - Voice loop
-- MCP as the core runtime
 - Cloud-provider-owned memory
+- Unrestricted context dumps to agents

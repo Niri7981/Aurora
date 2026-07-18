@@ -1,19 +1,19 @@
 # Current Focus
 
-This week I am building AuroraPulse V1.
+This week I am building AuroraPulse Phase 4: MCP Identity Server.
 
 Primary goal:
-- Make any selected model know who I am before its first useful answer.
+- Let a fresh Codex task call Aurora MCP and know who I am without repeated setup.
 
-V1 scope:
-- Editable identity card.
-- Current focus file.
-- Context bundle preview.
-- Ollama provider first.
-- Provider abstraction for future GPT, Claude, and Gemini APIs.
+Phase 4 scope:
+- Local stdio MCP server.
+- Read-only identity, current-focus, and personal-context tools.
+- Source-aware Context Packs.
+- Minimum-necessary disclosure and local audit logs.
+- One end-to-end Codex integration.
 
-Out of scope for V1:
-- Full long-term memory automation.
+Out of scope for this phase:
+- Durable personal memory and automatic memory writes.
+- Generic document ingestion and vector databases.
 - Voice loop.
-- MCP as the core runtime.
 - Full-disk scanning.

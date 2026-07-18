@@ -2,15 +2,17 @@
 
 [English](README.md) | **简体中文**
 
-AuroraPulse 是一个本地优先的个人上下文与助手运行时。
+AuroraPulse 是面向 AI Agent 的本地个人身份与记忆层。
 
-V1 聚焦于一个明确目标：
+它的产品北极星是：
 
-> 无论选择哪个模型，它都应该在第一次有效回复前知道自己正在帮助谁，同时个人记忆不归模型提供方所有。
+> 把自己告诉 Aurora 一次，所有你授权的 AI 都能认识你。
 
-当前实现是一个 Rust CLI，支持 Ollama 和 OpenAI 兼容提供方。本地上下文、Planner 决策、Harness 策略与原生工具执行彼此分离，因此模型提供方既不拥有记忆，也不能直接控制系统。
+Aurora 在用户本机维护一份由用户拥有的个人事实源，并且只向获得授权的 AI 提供当前任务真正需要的上下文。身份、当前关注、偏好、记忆和披露策略属于 Aurora 与用户，而不属于任何模型提供方。
 
-## V1 功能
+当前实现是这个产品方向的 Rust 基础：一个具备可编辑本地上下文、Ollama 与 OpenAI 兼容提供方、结构化 Planner、自定义 Harness 和权限受控原生工具的 CLI。Phase 4 已加入第一个面向外部 Agent 的产品边界：只读本地 MCP Server，让获得授权的 Agent 请求有范围限制的 Context Pack。
+
+## 当前基础
 
 - 可编辑的身份卡
 - 当前关注事项文件
@@ -22,6 +24,22 @@ V1 聚焦于一个明确目标：
 - 结构化 Planner 决策与自定义 Harness
 - 带集中式风险策略的统一原生工具注册表
 - 可检查的标准化工具结果
+- 提供结构化 Context Pack 的只读本地 MCP 身份服务
+- 动态脱敏标记与本地 MCP 访问审计日志
+
+## MCP 身份服务
+
+Phase 4 已将现有本地上下文层变成可供其他 Agent 使用的 MCP 身份服务。这一切片刻意保持很小：
+
+- 本地 stdio MCP Server
+- 只读的身份、当前关注和个人上下文工具
+- 带来源信息、针对当前任务生成的 Context Pack
+- 最小必要披露与明确的敏感信息边界
+- 与 Codex 跑通端到端集成，证明全新任务无需重复介绍也能认识用户
+
+这条端到端链路已于 2026-07-18 在全新 Codex 任务中验证。Codex 自动发现并调用 `get_identity` 与 `get_current_focus`，随后仅根据 `aurora://identity-card.md` 和 `aurora://current-focus.md` 回答，没有读取工作区文件。
+
+长期记忆写入、泛文档摄取和语音能力继续延后，先让只读跨 Agent 身份链路接受更多真实使用。
 
 ## 本地身份文件
 
@@ -58,6 +76,7 @@ CLI 内可使用：
 /context init
 /context preview
 /model
+/mcp log
 /tools
 /tools log
 ```
@@ -68,11 +87,30 @@ CLI 内可使用：
 
 `/tools` 显示注入 Planner 提示词的准确工具目录；`/tools log` 显示当前进程中最近的标准化工具结果与执行耗时。
 
+`/mcp log` 显示外部 Agent 最近的上下文访问，包括客户端、工具、返回的来源 URI 和脱敏行数。
+
 普通请求会在本地身份上下文之后发送给模型：
 
 ```text
 我下一步应该做什么？
 ```
+
+以本地 MCP Server 运行 Aurora：
+
+```bash
+cargo build --release
+./target/release/aurora serve .
+```
+
+将 release 二进制注册到 Codex：
+
+```bash
+codex mcp add aurora \
+  --env AURORA_MCP_CLIENT=codex \
+  -- "$(pwd)/target/release/aurora" serve "$(pwd)"
+```
+
+stdio Server 提供三个只读工具：`get_identity`、`get_current_focus` 和 `search_personal_context`。
 
 ## 环境配置
 
@@ -154,12 +192,12 @@ Phase 2 加入提供方中立的模型边界、按提供方过滤上下文的策
 
 Phase 3 完成结构化 Planner、自定义 Harness、统一 Tool Registry、集中式权限策略、标准化工具结果、有界执行与可检查日志。
 
-Phase 1 到 Phase 3 已全部完成。**Phase 4：Local Knowledge 计划于 2026-07-18 正式开始**，将从现有 `retrieve` 决策分支、经过授权的 Markdown/文本来源和带来源依据的回答开始。
+Phase 1 到 Phase 4 已全部完成。**Phase 4：MCP Identity Server 已于 2026-07-18 通过 Codex 真实验证。**下一阶段是持久、可由用户纠正的个人记忆。
 
 ## V1 不包含
 
 - 全盘扫描
 - 自动长期记忆
 - 语音循环
-- 将 MCP 作为核心运行时
 - 由云端模型提供方拥有的记忆
+- 向 Agent 无限制倾倒全部上下文

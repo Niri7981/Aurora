@@ -8,6 +8,8 @@
       "local-first architecture",
       "small inspectable modules",
       "explicit context boundaries",
+      "cross-agent context portability",
+      "minimum-necessary disclosure",
       "tests for behavior that protects privacy"
     ],
     "avoid": [
