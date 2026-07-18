@@ -97,6 +97,25 @@ fn cloud_model_context_excludes_local_only_lines() {
 }
 
 #[test]
+fn cloud_model_context_uses_configured_redaction_markers() {
+    let config = test_config();
+    write_file(
+        &config.identity_card_path,
+        "# Identity\nPublic context\nconfidential: custom hidden value",
+    );
+    write_file(
+        &config.privacy_rules_path,
+        r#"{"redaction_markers":["confidential:"]}"#,
+    );
+
+    let loaded = context::load(&config).expect("context should load");
+    let rendered = loaded.render_model_context("openai");
+
+    assert!(rendered.contains("Public context"));
+    assert!(!rendered.contains("custom hidden value"));
+}
+
+#[test]
 fn init_files_creates_templates_without_overwriting_existing_files() {
     let config = test_config();
     write_file(

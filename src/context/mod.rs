@@ -10,6 +10,7 @@ const IDENTITY_CARD_TEMPLATE: &str = include_str!("../../examples/identity-card.
 const CURRENT_FOCUS_TEMPLATE: &str = include_str!("../../examples/current-focus.md");
 const PREFERENCES_TEMPLATE: &str = include_str!("../../examples/preferences.json");
 const PRIVACY_RULES_TEMPLATE: &str = include_str!("../../examples/privacy-rules.json");
+const DEFAULT_REDACTION_MARKERS: [&str; 2] = ["private:", "local-only:"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextDocument {
@@ -26,6 +27,17 @@ pub struct LocalContext {
     pub privacy_rules: Option<ContextDocument>,
     pub project_contexts: Vec<ContextDocument>,
     pub missing: Vec<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DisclosurePolicy {
+    redaction_markers: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FilteredContent {
+    pub content: String,
+    pub omitted_line_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,6 +84,57 @@ impl ProviderKind {
     }
 }
 
+impl DisclosurePolicy {
+    pub fn from_context(context: &LocalContext) -> Self {
+        let configured = context
+            .privacy_rules
+            .as_ref()
+            .and_then(|document| serde_json::from_str::<Value>(&document.content).ok())
+            .and_then(|value| value.get("redaction_markers").cloned())
+            .and_then(|markers| markers.as_array().cloned())
+            .map(|markers| {
+                markers
+                    .into_iter()
+                    .filter_map(|marker| {
+                        marker.as_str().map(str::trim).map(str::to_ascii_lowercase)
+                    })
+                    .filter(|marker| !marker.is_empty())
+                    .collect::<Vec<_>>()
+            })
+            .filter(|markers| !markers.is_empty());
+
+        Self {
+            redaction_markers: configured.unwrap_or_else(|| {
+                DEFAULT_REDACTION_MARKERS
+                    .iter()
+                    .map(|marker| marker.to_string())
+                    .collect()
+            }),
+        }
+    }
+
+    pub fn filter_external(&self, content: &str) -> FilteredContent {
+        let mut omitted_line_count = 0;
+        let lines = content
+            .lines()
+            .filter(|line| {
+                let lower = line.to_ascii_lowercase();
+                let blocked = self
+                    .redaction_markers
+                    .iter()
+                    .any(|marker| lower.contains(marker));
+                omitted_line_count += usize::from(blocked);
+                !blocked
+            })
+            .collect::<Vec<_>>();
+
+        FilteredContent {
+            content: lines.join("\n"),
+            omitted_line_count,
+        }
+    }
+}
+
 impl LocalContext {
     pub fn load(config: &AppConfig) -> Result<Self, String> {
         let mut missing = Vec::new();
@@ -110,22 +173,48 @@ impl LocalContext {
 
     pub fn render_preview(&self, provider: &str) -> String {
         let provider_kind = ProviderKind::from_name(provider);
+        let disclosure_policy = DisclosurePolicy::from_context(self);
         let mut output = String::from("Context preview\n");
         output.push_str(&format!("Provider: {provider}\n"));
         output.push_str(&format!("Policy: {:?}\n\n", provider_kind));
 
-        render_document(&mut output, &self.identity_card, provider_kind);
-        render_document(&mut output, &self.current_focus, provider_kind);
-        render_document(&mut output, &self.preferences, provider_kind);
+        render_document(
+            &mut output,
+            &self.identity_card,
+            provider_kind,
+            &disclosure_policy,
+        );
+        render_document(
+            &mut output,
+            &self.current_focus,
+            provider_kind,
+            &disclosure_policy,
+        );
+        render_document(
+            &mut output,
+            &self.preferences,
+            provider_kind,
+            &disclosure_policy,
+        );
         if provider_kind == ProviderKind::Local {
-            render_document(&mut output, &self.privacy_rules, provider_kind);
+            render_document(
+                &mut output,
+                &self.privacy_rules,
+                provider_kind,
+                &disclosure_policy,
+            );
         }
 
         if self.project_contexts.is_empty() {
             output.push_str("Project Context: not found\n\n");
         } else {
             for document in &self.project_contexts {
-                render_document(&mut output, &Some(document.clone()), provider_kind);
+                render_document(
+                    &mut output,
+                    &Some(document.clone()),
+                    provider_kind,
+                    &disclosure_policy,
+                );
             }
         }
 
@@ -141,20 +230,46 @@ impl LocalContext {
 
     pub fn render_model_context(&self, provider: &str) -> String {
         let provider_kind = ProviderKind::from_name(provider);
+        let disclosure_policy = DisclosurePolicy::from_context(self);
         let mut output = String::from(
             "Use this local AuroraPulse context to understand who you are helping. Do not claim these files exist unless the user asks about sources.\n\n",
         );
 
-        append_prompt_document(&mut output, &self.identity_card, provider_kind);
-        append_prompt_document(&mut output, &self.current_focus, provider_kind);
-        append_prompt_document(&mut output, &self.preferences, provider_kind);
+        append_prompt_document(
+            &mut output,
+            &self.identity_card,
+            provider_kind,
+            &disclosure_policy,
+        );
+        append_prompt_document(
+            &mut output,
+            &self.current_focus,
+            provider_kind,
+            &disclosure_policy,
+        );
+        append_prompt_document(
+            &mut output,
+            &self.preferences,
+            provider_kind,
+            &disclosure_policy,
+        );
 
         if provider_kind == ProviderKind::Local {
-            append_prompt_document(&mut output, &self.privacy_rules, provider_kind);
+            append_prompt_document(
+                &mut output,
+                &self.privacy_rules,
+                provider_kind,
+                &disclosure_policy,
+            );
         }
 
         for document in &self.project_contexts {
-            append_prompt_document(&mut output, &Some(document.clone()), provider_kind);
+            append_prompt_document(
+                &mut output,
+                &Some(document.clone()),
+                provider_kind,
+                &disclosure_policy,
+            );
         }
 
         output.trim_end().to_string()
@@ -289,6 +404,7 @@ fn render_document(
     output: &mut String,
     document: &Option<ContextDocument>,
     provider_kind: ProviderKind,
+    disclosure_policy: &DisclosurePolicy,
 ) {
     if let Some(document) = document {
         output.push_str(&format!(
@@ -296,7 +412,11 @@ fn render_document(
             document.label,
             document.path.display()
         ));
-        output.push_str(&redact_for_provider(&document.content, provider_kind));
+        output.push_str(&redact_for_provider(
+            &document.content,
+            provider_kind,
+            disclosure_policy,
+        ));
         output.push_str("\n\n");
     }
 }
@@ -305,25 +425,27 @@ fn append_prompt_document(
     output: &mut String,
     document: &Option<ContextDocument>,
     provider_kind: ProviderKind,
+    disclosure_policy: &DisclosurePolicy,
 ) {
     if let Some(document) = document {
         output.push_str(&format!("## {}\n", document.label));
-        output.push_str(&redact_for_provider(&document.content, provider_kind));
+        output.push_str(&redact_for_provider(
+            &document.content,
+            provider_kind,
+            disclosure_policy,
+        ));
         output.push_str("\n\n");
     }
 }
 
-fn redact_for_provider(content: &str, provider_kind: ProviderKind) -> String {
+fn redact_for_provider(
+    content: &str,
+    provider_kind: ProviderKind,
+    disclosure_policy: &DisclosurePolicy,
+) -> String {
     if provider_kind == ProviderKind::Local {
         return content.to_string();
     }
 
-    content
-        .lines()
-        .filter(|line| {
-            let lower = line.to_ascii_lowercase();
-            !(lower.contains("private:") || lower.contains("local-only:"))
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    disclosure_policy.filter_external(content).content
 }
