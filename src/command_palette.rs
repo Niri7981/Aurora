@@ -4,7 +4,7 @@ pub struct SlashCommand {
     pub description: &'static str,
 }
 
-const SLASH_COMMANDS: [SlashCommand; 8] = [
+const SLASH_COMMANDS: [SlashCommand; 9] = [
     SlashCommand {
         name: "/clear",
         description: "Clear the current session",
@@ -24,6 +24,10 @@ const SLASH_COMMANDS: [SlashCommand; 8] = [
     SlashCommand {
         name: "/model",
         description: "Browse and switch models",
+    },
+    SlashCommand {
+        name: "/mcp log",
+        description: "Inspect recent MCP context access",
     },
     SlashCommand {
         name: "/resume",
@@ -60,7 +64,7 @@ mod tests {
 
     #[test]
     fn slash_lists_all_commands() {
-        assert_eq!(matching_commands("/").len(), 8);
+        assert_eq!(matching_commands("/").len(), 9);
     }
 
     #[test]

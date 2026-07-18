@@ -1,6 +1,7 @@
 use crate::config::AppConfig;
 use crate::context;
 use crate::harness::{ConfirmationDecision, Harness};
+use crate::mcp;
 use crate::model::ChatClient;
 use crate::planner::{PlannerDecision, build_system_prompt};
 
@@ -81,6 +82,13 @@ impl<C: ChatClient> App<C> {
             return Ok(TurnOutcome::Reply(format!(
                 "助手>\n{}",
                 self.harness.render_tool_logs()
+            )));
+        }
+
+        if trimmed == "/mcp log" {
+            return Ok(TurnOutcome::Reply(format!(
+                "助手>\n{}",
+                mcp::render_audit_log(&self.config, 10)?
             )));
         }
 

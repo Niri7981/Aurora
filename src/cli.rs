@@ -18,7 +18,7 @@ use crate::startup_animation;
 use crate::theme::{ACCENT, BOLD, DIM, LOGO_HIGHLIGHT, MUTED, PANEL_BACKGROUND, RESET};
 
 const APP_NAME: &str = "A U R O R A";
-const APP_TAGLINE: &str = "local-first assistant shell";
+const APP_TAGLINE: &str = "local identity and memory layer";
 pub fn run(config: &AppConfig) -> Result<(), String> {
     let banner = render_banner(
         Path::new(&config.workspace),

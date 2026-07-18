@@ -249,6 +249,25 @@ fn tools_and_tool_logs_are_local_inspection_commands() {
 }
 
 #[test]
+fn mcp_log_is_a_local_inspection_command() {
+    let config = test_config();
+    write_file(
+        &config.aurora_home.join("audit/mcp.jsonl"),
+        r#"{"timestamp_unix_ms":1,"client":"codex","tool":"get_identity","purpose":"know the user","query":null,"status":"succeeded","returned_sources":["aurora://identity-card.md"],"omitted_lines":1,"error":null}"#,
+    );
+    let client = PanicClient;
+    let mut app = App::new(config, client);
+
+    let outcome = app.handle_text("/mcp log").expect("MCP log should render");
+
+    assert!(matches!(outcome, TurnOutcome::Reply(text) if
+        text.contains("get_identity")
+        && text.contains("aurora://identity-card.md")
+        && text.contains("omitted=1")
+    ));
+}
+
+#[test]
 fn pending_tool_denial_is_handled_without_calling_model_again() {
     let config = test_config();
     let responses = Rc::new(RefCell::new(vec![
