@@ -12,12 +12,6 @@ fn test_config() -> AppConfig {
     let root = unique_temp_dir("context-loading");
     AppConfig {
         workspace: root.clone(),
-        provider: "ollama".to_string(),
-        model: "test-model".to_string(),
-        ollama_url: "http://127.0.0.1:11434".to_string(),
-        openai_api_key: None,
-        openai_base_url: "https://api.openai.com".to_string(),
-        openai_model: "gpt-4o-mini".to_string(),
         aurora_home: root.join(".aurorapulse"),
         identity_card_path: root.join(".aurorapulse/identity-card.md"),
         current_focus_path: root.join(".aurorapulse/current-focus.md"),
@@ -81,7 +75,7 @@ fn loads_identity_focus_preferences_privacy_and_project_context() {
 }
 
 #[test]
-fn cloud_model_context_excludes_local_only_lines() {
+fn external_preview_excludes_private_lines() {
     let config = test_config();
     write_file(
         &config.identity_card_path,
@@ -89,15 +83,16 @@ fn cloud_model_context_excludes_local_only_lines() {
     );
 
     let loaded = context::load(&config).expect("context should load");
-    let rendered = loaded.render_model_context("openai");
+    let rendered = loaded.render_preview();
 
     assert!(rendered.contains("Public context"));
     assert!(!rendered.contains("keep this on device"));
     assert!(!rendered.contains("hidden"));
+    assert!(rendered.contains("2 line(s) omitted"));
 }
 
 #[test]
-fn cloud_model_context_uses_configured_redaction_markers() {
+fn external_preview_uses_configured_redaction_markers() {
     let config = test_config();
     write_file(
         &config.identity_card_path,
@@ -109,7 +104,7 @@ fn cloud_model_context_uses_configured_redaction_markers() {
     );
 
     let loaded = context::load(&config).expect("context should load");
-    let rendered = loaded.render_model_context("openai");
+    let rendered = loaded.render_preview();
 
     assert!(rendered.contains("Public context"));
     assert!(!rendered.contains("custom hidden value"));

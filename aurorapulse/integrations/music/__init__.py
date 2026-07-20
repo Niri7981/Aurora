@@ -1,2 +1,0 @@
-"""Music platform integrations."""
-

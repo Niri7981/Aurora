@@ -2,35 +2,14 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub const DEFAULT_MODEL: &str = "gemma4:e4b";
-pub const DEFAULT_OLLAMA_URL: &str = "http://127.0.0.1:11434";
-pub const DEFAULT_PROVIDER: &str = "ollama";
-pub const DEFAULT_OPENAI_MODEL: &str = "gpt-4o-mini";
-pub const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com";
-
 #[derive(Clone)]
 pub struct AppConfig {
     pub workspace: PathBuf,
-    pub provider: String,
-    pub model: String,
-    pub ollama_url: String,
-    pub openai_api_key: Option<String>,
-    pub openai_base_url: String,
-    pub openai_model: String,
     pub aurora_home: PathBuf,
     pub identity_card_path: PathBuf,
     pub current_focus_path: PathBuf,
     pub preferences_path: PathBuf,
     pub privacy_rules_path: PathBuf,
-}
-
-impl AppConfig {
-    pub fn active_model(&self) -> &str {
-        match self.provider.as_str() {
-            "openai" => self.openai_model.as_str(),
-            _ => self.model.as_str(),
-        }
-    }
 }
 
 pub fn load_config(workspace_arg: Option<String>) -> Result<AppConfig, String> {
@@ -45,16 +24,6 @@ pub fn load_config(workspace_arg: Option<String>) -> Result<AppConfig, String> {
 
     load_dotenv(&workspace)?;
 
-    let provider = env::var("AURORA_PROVIDER").unwrap_or_else(|_| DEFAULT_PROVIDER.to_string());
-    let model = env::var("OLLAMA_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
-    let ollama_url = env::var("OLLAMA_URL").unwrap_or_else(|_| DEFAULT_OLLAMA_URL.to_string());
-    let openai_api_key = env::var("OPENAI_API_KEY")
-        .ok()
-        .filter(|value| !value.trim().is_empty());
-    let openai_base_url =
-        env::var("OPENAI_BASE_URL").unwrap_or_else(|_| DEFAULT_OPENAI_BASE_URL.to_string());
-    let openai_model =
-        env::var("OPENAI_MODEL").unwrap_or_else(|_| DEFAULT_OPENAI_MODEL.to_string());
     let aurora_home = resolve_aurora_home()?;
     let identity_card_path =
         env_path_or_default("AURORA_IDENTITY_CARD", "identity-card.md", &aurora_home);
@@ -67,12 +36,6 @@ pub fn load_config(workspace_arg: Option<String>) -> Result<AppConfig, String> {
 
     Ok(AppConfig {
         workspace,
-        provider,
-        model,
-        ollama_url,
-        openai_api_key,
-        openai_base_url,
-        openai_model,
         aurora_home,
         identity_card_path,
         current_focus_path,
@@ -125,13 +88,13 @@ fn load_dotenv(workspace: &Path) -> Result<(), String> {
         if raw.is_empty() || raw.starts_with('#') || raw.starts_with('[') {
             continue;
         }
-        if let Some((key, value)) = raw.split_once('=') {
-            if env::var_os(key.trim()).is_none() {
-                // Safety: we set process env during single-threaded startup before any
-                // worker threads exist, which avoids concurrent environment access.
-                unsafe {
-                    env::set_var(key.trim(), value.trim());
-                }
+        if let Some((key, value)) = raw.split_once('=')
+            && env::var_os(key.trim()).is_none()
+        {
+            // Safety: we set process env during single-threaded startup before any
+            // worker threads exist, which avoids concurrent environment access.
+            unsafe {
+                env::set_var(key.trim(), value.trim());
             }
         }
     }

@@ -13,12 +13,6 @@ fn test_config() -> AppConfig {
     let root = unique_temp_dir("mcp-identity");
     AppConfig {
         workspace: root.clone(),
-        provider: "ollama".to_string(),
-        model: "test-model".to_string(),
-        ollama_url: "http://127.0.0.1:11434".to_string(),
-        openai_api_key: None,
-        openai_base_url: "https://api.openai.com".to_string(),
-        openai_model: "gpt-4o-mini".to_string(),
         aurora_home: root.join(".aurorapulse"),
         identity_card_path: root.join(".aurorapulse/identity-card.md"),
         current_focus_path: root.join(".aurorapulse/current-focus.md"),

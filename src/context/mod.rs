@@ -69,21 +69,6 @@ impl InitReport {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProviderKind {
-    Local,
-    Cloud,
-}
-
-impl ProviderKind {
-    pub fn from_name(provider: &str) -> Self {
-        match provider {
-            "openai" | "anthropic" | "gemini" => Self::Cloud,
-            _ => Self::Local,
-        }
-    }
-}
-
 impl DisclosurePolicy {
     pub fn from_context(context: &LocalContext) -> Self {
         let configured = context
@@ -171,50 +156,21 @@ impl LocalContext {
         })
     }
 
-    pub fn render_preview(&self, provider: &str) -> String {
-        let provider_kind = ProviderKind::from_name(provider);
+    pub fn render_preview(&self) -> String {
         let disclosure_policy = DisclosurePolicy::from_context(self);
-        let mut output = String::from("Context preview\n");
-        output.push_str(&format!("Provider: {provider}\n"));
-        output.push_str(&format!("Policy: {:?}\n\n", provider_kind));
+        let mut output = String::from(
+            "External context preview\nPolicy: read-only, minimum-necessary disclosure\n\n",
+        );
 
-        render_document(
-            &mut output,
-            &self.identity_card,
-            provider_kind,
-            &disclosure_policy,
-        );
-        render_document(
-            &mut output,
-            &self.current_focus,
-            provider_kind,
-            &disclosure_policy,
-        );
-        render_document(
-            &mut output,
-            &self.preferences,
-            provider_kind,
-            &disclosure_policy,
-        );
-        if provider_kind == ProviderKind::Local {
-            render_document(
-                &mut output,
-                &self.privacy_rules,
-                provider_kind,
-                &disclosure_policy,
-            );
-        }
+        render_external_document(&mut output, &self.identity_card, &disclosure_policy);
+        render_external_document(&mut output, &self.current_focus, &disclosure_policy);
+        render_external_document(&mut output, &self.preferences, &disclosure_policy);
 
         if self.project_contexts.is_empty() {
             output.push_str("Project Context: not found\n\n");
         } else {
             for document in &self.project_contexts {
-                render_document(
-                    &mut output,
-                    &Some(document.clone()),
-                    provider_kind,
-                    &disclosure_policy,
-                );
+                render_external_document(&mut output, &Some(document.clone()), &disclosure_policy);
             }
         }
 
@@ -223,53 +179,6 @@ impl LocalContext {
             for path in &self.missing {
                 output.push_str(&format!("- {}\n", path.display()));
             }
-        }
-
-        output.trim_end().to_string()
-    }
-
-    pub fn render_model_context(&self, provider: &str) -> String {
-        let provider_kind = ProviderKind::from_name(provider);
-        let disclosure_policy = DisclosurePolicy::from_context(self);
-        let mut output = String::from(
-            "Use this local AuroraPulse context to understand who you are helping. Do not claim these files exist unless the user asks about sources.\n\n",
-        );
-
-        append_prompt_document(
-            &mut output,
-            &self.identity_card,
-            provider_kind,
-            &disclosure_policy,
-        );
-        append_prompt_document(
-            &mut output,
-            &self.current_focus,
-            provider_kind,
-            &disclosure_policy,
-        );
-        append_prompt_document(
-            &mut output,
-            &self.preferences,
-            provider_kind,
-            &disclosure_policy,
-        );
-
-        if provider_kind == ProviderKind::Local {
-            append_prompt_document(
-                &mut output,
-                &self.privacy_rules,
-                provider_kind,
-                &disclosure_policy,
-            );
-        }
-
-        for document in &self.project_contexts {
-            append_prompt_document(
-                &mut output,
-                &Some(document.clone()),
-                provider_kind,
-                &disclosure_policy,
-            );
         }
 
         output.trim_end().to_string()
@@ -311,26 +220,6 @@ pub fn init_files(config: &AppConfig) -> Result<InitReport, String> {
     )?;
 
     Ok(report)
-}
-
-pub fn compose_user_prompt(
-    context: &LocalContext,
-    provider: &str,
-    model: &str,
-    user_text: &str,
-) -> String {
-    let context_text = context.render_model_context(provider);
-    let runtime_text = format!("## Aurora Runtime\nProvider: {provider}\nModel: {model}");
-    if context_text.trim().is_empty() {
-        return format!("{runtime_text}\n\nCurrent user request:\n{user_text}");
-    }
-
-    format!(
-        "{runtime_text}\n\n{context_text}\n\nCurrent user request:\n{user_text}",
-        runtime_text = runtime_text,
-        context_text = context_text,
-        user_text = user_text
-    )
 }
 
 fn write_template_if_missing(
@@ -400,10 +289,9 @@ fn validate_json(label: &str, document: &ContextDocument) -> Result<(), String> 
     Ok(())
 }
 
-fn render_document(
+fn render_external_document(
     output: &mut String,
     document: &Option<ContextDocument>,
-    provider_kind: ProviderKind,
     disclosure_policy: &DisclosurePolicy,
 ) {
     if let Some(document) = document {
@@ -412,40 +300,14 @@ fn render_document(
             document.label,
             document.path.display()
         ));
-        output.push_str(&redact_for_provider(
-            &document.content,
-            provider_kind,
-            disclosure_policy,
-        ));
+        let filtered = disclosure_policy.filter_external(&document.content);
+        output.push_str(&filtered.content);
+        if filtered.omitted_line_count > 0 {
+            output.push_str(&format!(
+                "\n[{} line(s) omitted by privacy policy]",
+                filtered.omitted_line_count
+            ));
+        }
         output.push_str("\n\n");
     }
-}
-
-fn append_prompt_document(
-    output: &mut String,
-    document: &Option<ContextDocument>,
-    provider_kind: ProviderKind,
-    disclosure_policy: &DisclosurePolicy,
-) {
-    if let Some(document) = document {
-        output.push_str(&format!("## {}\n", document.label));
-        output.push_str(&redact_for_provider(
-            &document.content,
-            provider_kind,
-            disclosure_policy,
-        ));
-        output.push_str("\n\n");
-    }
-}
-
-fn redact_for_provider(
-    content: &str,
-    provider_kind: ProviderKind,
-    disclosure_policy: &DisclosurePolicy,
-) -> String {
-    if provider_kind == ProviderKind::Local {
-        return content.to_string();
-    }
-
-    disclosure_policy.filter_external(content).content
 }
