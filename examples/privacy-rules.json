@@ -1,8 +1,8 @@
 {
-  "default_provider_policy": {
-    "local": "identity card and current focus may be used by default",
-    "cloud": "send only the shortest necessary identity context",
-    "mcp": "read-only and minimum-necessary disclosure for authorized agents"
+  "default_disclosure_policy": {
+    "mcp": "read-only and minimum-necessary disclosure for authorized agents",
+    "raw_imports": "never disclose raw imported sources by default",
+    "durable_memory": "return only current, approved, task-relevant records"
   },
   "blocked_without_confirmation": [
     "secrets",

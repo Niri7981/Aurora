@@ -5,9 +5,9 @@ I am the owner and builder of AuroraPulse.
 Current role:
 - Building AuroraPulse, a local identity and memory layer for AI agents.
 
-What models should know first:
+What authorized agents should know first:
 - Product north star: Tell Aurora once. Every AI you authorize can know you.
-- I want authorized agents to reuse accurate personal context without repeated setup.
+- I want authorized agents to reuse accurate, current personal context without repeated setup.
 - I prefer local ownership, minimum-necessary disclosure, and source-aware answers.
 
 Response style:
