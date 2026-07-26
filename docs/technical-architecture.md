@@ -9,11 +9,11 @@ It does not embed a model, run a chat loop, or execute general agent actions.
 ## Current Components
 
 ```text
-src/main.rs          process entrypoint
-src/cli.rs           serve/init/preview/audit commands
-src/config.rs        workspace and local data paths
-src/context/mod.rs   source loading, validation, templates, disclosure policy
-src/mcp.rs           MCP tools, retrieval, ContextPack assembly, audit
+backend/src/main.rs          process entrypoint
+backend/src/cli.rs           serve/init/preview/audit commands
+backend/src/config.rs        workspace and local data paths
+backend/src/context/mod.rs   source loading, validation, templates, disclosure policy
+backend/src/mcp.rs           MCP tools, retrieval, ContextPack assembly, audit
 ```
 
 ## Runtime Flow

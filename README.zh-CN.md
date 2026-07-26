@@ -99,16 +99,18 @@ AURORA_MCP_CLIENT=client-name
 ## 仓库结构
 
 ```text
-src/
-  main.rs
-  cli.rs
-  config.rs
-  context/
-    mod.rs
-  mcp.rs
-tests/
-  context_loading.rs
-  mcp_identity.rs
+backend/
+  Cargo.toml
+  src/
+    main.rs
+    cli.rs
+    config.rs
+    context/
+      mod.rs
+    mcp.rs
+  tests/
+    context_loading.rs
+    mcp_identity.rs
 examples/
 docs/
   product.md
