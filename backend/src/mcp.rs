@@ -14,6 +14,7 @@ use serde_json::Value;
 
 use crate::config::AppConfig;
 use crate::context::{self, ContextDocument, DisclosurePolicy, LocalContext};
+use crate::db;
 
 const DEFAULT_SEARCH_LIMIT: usize = 4;
 const MAX_SEARCH_LIMIT: usize = 6;
@@ -384,6 +385,7 @@ pub fn run(config: AppConfig) -> Result<(), String> {
         .build()
         .map_err(|error| format!("failed to start MCP runtime: {error}"))?;
     runtime.block_on(async move {
+        let _pool = db::connect_and_migrate().await?;
         let server = AuroraMcpServer::new(config, client);
         let service = server
             .serve(stdio())
