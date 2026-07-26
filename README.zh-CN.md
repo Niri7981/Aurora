@@ -102,15 +102,26 @@ AURORA_MCP_CLIENT=client-name
 backend/
   Cargo.toml
   src/
+    api/
+      cli.rs
+      mcp.rs
+    application/
+      context_gateway.rs
+    domain/
+      context.rs
+      context_pack.rs
+      disclosure.rs
+    infrastructure/
+      audit_log.rs
+      local_context.rs
+      database/
+        mod.rs
     main.rs
-    cli.rs
+    lib.rs
     config.rs
-    context/
-      mod.rs
-    mcp.rs
   tests/
     context_loading.rs
-    mcp_identity.rs
+    context_gateway.rs
 examples/
 docs/
   product.md
@@ -121,6 +132,6 @@ docs/
 
 ## 下一步
 
-下一阶段是建立带来源、可由用户纠正的长期记忆。之后通过 Source Adapter 导入聊天记录、笔记、邮件和文档，先生成可审阅的记忆候选，而不是默认把原始内容直接披露给 AI。
+下一阶段先导入一段范围可控的聊天资料，由用户授权会话和时间范围，再让 Codex 通过 MCP 完成带消息引用的分析。长期个人记忆是随后的第二个闭环。
 
 参见[产品定义](docs/product.md)、[技术架构](docs/technical-architecture.md)和[路线图](docs/roadmap-cn.md)。

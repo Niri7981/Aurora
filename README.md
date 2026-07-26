@@ -102,15 +102,26 @@ AURORA_MCP_CLIENT=client-name
 backend/
   Cargo.toml
   src/
+    api/
+      cli.rs
+      mcp.rs
+    application/
+      context_gateway.rs
+    domain/
+      context.rs
+      context_pack.rs
+      disclosure.rs
+    infrastructure/
+      audit_log.rs
+      local_context.rs
+      database/
+        mod.rs
     main.rs
-    cli.rs
+    lib.rs
     config.rs
-    context/
-      mod.rs
-    mcp.rs
   tests/
     context_loading.rs
-    mcp_identity.rs
+    context_gateway.rs
 examples/
 docs/
   product.md
@@ -121,6 +132,6 @@ docs/
 
 ## Next
 
-The next product slice is durable, user-correctable memory with provenance. After that, source adapters can import chat records, notes, email, and documents into reviewable memory candidates. Raw imported content will not be disclosed directly by default.
+The next product slice imports a bounded chat source, lets the user authorize a conversation and time range, and lets Codex analyze it through MCP with message-level citations. Durable memory follows as a second loop.
 
 See [Product](docs/product.md), [Technical Architecture](docs/technical-architecture.md), and [Roadmap](docs/roadmap-cn.md).

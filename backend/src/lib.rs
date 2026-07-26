@@ -1,9 +1,26 @@
-pub mod cli;
+pub mod api;
+pub mod application;
 pub mod config;
-pub mod context;
-pub mod db;
-pub mod mcp;
+pub mod domain;
+pub mod infrastructure;
+
+use application::context_gateway::ContextGateway;
+use config::AppConfig;
+use infrastructure::database;
 
 pub fn run_args(args: impl IntoIterator<Item = String>) -> Result<(), String> {
-    cli::run_args(args)
+    api::cli::run_args(args)
+}
+
+fn run_mcp(config: AppConfig) -> Result<(), String> {
+    let client = std::env::var("AURORA_MCP_CLIENT").unwrap_or_else(|_| "unknown-agent".to_string());
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| format!("failed to start MCP runtime: {error}"))?;
+    runtime.block_on(async move {
+        let _pool = database::connect_and_migrate().await?;
+        let gateway = ContextGateway::new(config, client);
+        api::mcp::serve(gateway).await
+    })
 }

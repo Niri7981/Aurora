@@ -37,8 +37,8 @@ Codex 从分析中提出记忆候选
 ## 当前指针
 
 ```text
-当前状态：第一个闭环 / Milestone 1 / 任务 1.2 已完成，等待复核
-当前任务：1.2 创建空迁移目录并建立 PgPool（已完成）
+当前状态：第一个闭环 / 后端分层重构已完成，等待复核
+当前任务：拆分 MCP、Application、Domain、Infrastructure（已完成）
 下一步：1.3 创建本地开发数据库并增加健康检查
 现在不要做：聊天表、微信解析、MCP 聊天工具、长期记忆、数字替身面板
 ```
@@ -48,6 +48,9 @@ Codex 从分析中提出记忆候选
 - [x] 后端目录使用 `backend/`
 - [x] 现有 Rust MCP 项目已移动到 `backend/`
 - [x] 根目录 Cargo workspace 可正常测试
+- [x] 后端按 API、Application、Domain、Infrastructure 分层
+- [x] MCP Adapter 只保留 MCP 协议职责
+- [x] Context Gateway、Disclosure Policy、本地文件、审计和数据库分别归位
 - [x] 本地身份、当前关注、偏好和隐私文件
 - [x] `get_identity`
 - [x] `get_current_focus`

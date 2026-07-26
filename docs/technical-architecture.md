@@ -6,28 +6,46 @@ AuroraPulse is a local personal memory authority exposed through MCP. The runtim
 
 It does not embed a model, run a chat loop, or execute general agent actions.
 
-## Current Components
+## Current Modules
 
 ```text
-backend/src/main.rs          process entrypoint
-backend/src/cli.rs           serve/init/preview/audit commands
-backend/src/config.rs        workspace and local data paths
-backend/src/context/mod.rs   source loading, validation, templates, disclosure policy
-backend/src/mcp.rs           MCP tools, retrieval, ContextPack assembly, audit
+backend/src/api/cli.rs                         CLI adapter and output rendering
+backend/src/api/mcp.rs                         MCP protocol adapter
+backend/src/application/context_gateway.rs     retrieval and disclosure orchestration
+backend/src/domain/context.rs                  local context domain data
+backend/src/domain/context_pack.rs             ContextPack domain data
+backend/src/domain/disclosure.rs               Disclosure Policy rules
+backend/src/infrastructure/local_context.rs     local file loading and initialization
+backend/src/infrastructure/audit_log.rs         JSONL Audit Event persistence
+backend/src/infrastructure/database/mod.rs      PostgreSQL pool and migrations
+backend/src/lib.rs                              runtime assembly
+backend/src/main.rs                             process entrypoint
 ```
+
+Dependency direction:
+
+```text
+API adapters -> Application -> Domain
+                       |
+                       -> Infrastructure -> Domain
+```
+
+The MCP adapter knows only the MCP protocol and the Context Gateway interface. Retrieval, disclosure, auditing, local files, PostgreSQL, and runtime assembly do not live in the MCP adapter.
 
 ## Runtime Flow
 
 ```text
 MCP host launches `aurora serve [workspace]`
+    -> lib.rs connects PostgreSQL and runs migrations
+    -> lib.rs assembles the Context Gateway and MCP adapter
     -> rmcp performs the stdio handshake
     -> client discovers read-only Aurora tools
     -> client calls a tool with a narrow purpose
-    -> Aurora reloads local context
-    -> retrieval selects a bounded set of documents
+    -> Context Gateway reloads local context
+    -> Context Gateway selects a bounded set of documents
     -> DisclosurePolicy removes marked lines
-    -> Aurora builds a source-aware ContextPack
-    -> audit event is appended locally
+    -> Context Gateway builds a source-aware ContextPack
+    -> infrastructure appends an Audit Event locally
     -> ContextPack is returned to the client
 ```
 

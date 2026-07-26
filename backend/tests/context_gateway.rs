@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use aurora::application::context_gateway::ContextGateway;
 use aurora::config::AppConfig;
-use aurora::mcp::AuroraContextService;
 use serde_json::Value;
 
 static TEMP_DIR_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -53,7 +53,7 @@ fn identity_pack_is_filtered_source_aware_and_audited() {
         &config.privacy_rules_path,
         r#"{"redaction_markers":["private:","confidential:"]}"#,
     );
-    let service = AuroraContextService::new(config.clone(), "codex");
+    let service = ContextGateway::new(config.clone(), "codex");
 
     let pack = service
         .get_identity("understand who the user is")
@@ -103,7 +103,7 @@ fn personal_context_search_is_bounded_and_excludes_privacy_rules() {
         &config.workspace.join("CONTEXT.md"),
         "# Project\nAuroraPulse roadmap and architecture.",
     );
-    let service = AuroraContextService::new(config, "codex");
+    let service = ContextGateway::new(config, "codex");
 
     let pack = service
         .search_personal_context("AuroraPulse 下一步", "plan the user's project", Some(2))
@@ -122,7 +122,7 @@ fn personal_context_search_is_bounded_and_excludes_privacy_rules() {
 #[test]
 fn missing_optional_context_returns_an_empty_audited_pack() {
     let config = test_config();
-    let service = AuroraContextService::new(config, "codex");
+    let service = ContextGateway::new(config, "codex");
 
     let pack = service
         .get_current_focus("continue the user's current work")
@@ -136,7 +136,7 @@ fn missing_optional_context_returns_an_empty_audited_pack() {
 #[test]
 fn empty_search_query_is_rejected_without_reading_context() {
     let config = test_config();
-    let service = AuroraContextService::new(config, "codex");
+    let service = ContextGateway::new(config, "codex");
 
     let error = service
         .search_personal_context("  ", "test", None)

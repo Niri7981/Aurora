@@ -4,7 +4,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use aurora::config::AppConfig;
-use aurora::context::{self, LocalContext};
+use aurora::domain::disclosure::DisclosurePolicy;
+use aurora::infrastructure::local_context;
 
 static TEMP_DIR_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -54,7 +55,7 @@ fn loads_identity_focus_preferences_privacy_and_project_context() {
         "# Project\nAuroraPulse",
     );
 
-    let loaded = LocalContext::load(&config).expect("context should load");
+    let loaded = local_context::load(&config).expect("context should load");
 
     assert!(
         loaded
@@ -82,13 +83,14 @@ fn external_preview_excludes_private_lines() {
         "# Identity\nPublic context\nlocal-only: keep this on device\nprivate: hidden",
     );
 
-    let loaded = context::load(&config).expect("context should load");
-    let rendered = loaded.render_preview();
+    let loaded = local_context::load(&config).expect("context should load");
+    let filtered = DisclosurePolicy::from_context(&loaded)
+        .filter_external(&loaded.identity_card.expect("identity should load").content);
 
-    assert!(rendered.contains("Public context"));
-    assert!(!rendered.contains("keep this on device"));
-    assert!(!rendered.contains("hidden"));
-    assert!(rendered.contains("2 line(s) omitted"));
+    assert!(filtered.content.contains("Public context"));
+    assert!(!filtered.content.contains("keep this on device"));
+    assert!(!filtered.content.contains("hidden"));
+    assert_eq!(filtered.omitted_line_count, 2);
 }
 
 #[test]
@@ -103,11 +105,12 @@ fn external_preview_uses_configured_redaction_markers() {
         r#"{"redaction_markers":["confidential:"]}"#,
     );
 
-    let loaded = context::load(&config).expect("context should load");
-    let rendered = loaded.render_preview();
+    let loaded = local_context::load(&config).expect("context should load");
+    let filtered = DisclosurePolicy::from_context(&loaded)
+        .filter_external(&loaded.identity_card.expect("identity should load").content);
 
-    assert!(rendered.contains("Public context"));
-    assert!(!rendered.contains("custom hidden value"));
+    assert!(filtered.content.contains("Public context"));
+    assert!(!filtered.content.contains("custom hidden value"));
 }
 
 #[test]
@@ -118,7 +121,7 @@ fn init_files_creates_templates_without_overwriting_existing_files() {
         "# Custom Identity\nDo not overwrite.",
     );
 
-    let report = context::init_files(&config).expect("init should succeed");
+    let report = local_context::init_files(&config).expect("init should succeed");
 
     assert!(report.existing.contains(&config.identity_card_path));
     assert!(report.created.contains(&config.current_focus_path));
