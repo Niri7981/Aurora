@@ -60,6 +60,14 @@ Preview exactly what may leave Aurora after privacy filtering:
 cargo run -- preview
 ```
 
+Start the local PostgreSQL database:
+
+```bash
+docker compose up -d postgres
+```
+
+Copy `.env.example` to `.env` and adjust any local paths before starting Aurora.
+
 ## Run The MCP Server
 
 ```bash

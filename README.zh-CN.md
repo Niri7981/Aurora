@@ -60,6 +60,14 @@ cargo run -- init
 cargo run -- preview
 ```
 
+启动本地 PostgreSQL 数据库：
+
+```bash
+docker compose up -d postgres
+```
+
+启动 Aurora 前，将 `.env.example` 复制为 `.env`，并按本机情况调整路径。
+
 ## 运行 MCP Server
 
 ```bash

@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: aurorapulse-postgres
+    environment:
+      POSTGRES_DB: aurorapulse
+      POSTGRES_USER: aurora
+      POSTGRES_PASSWORD: aurora-local
+    ports:
+      - "127.0.0.1:5434:5432"
+    volumes:
+      - aurorapulse_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aurora -d aurorapulse"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  aurorapulse_postgres_data:
