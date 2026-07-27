@@ -121,6 +121,7 @@ backend/
       conversation.rs
       disclosure.rs
       import_batch.rs
+      message.rs
     infrastructure/
       audit_log.rs
       local_context.rs
@@ -132,11 +133,13 @@ backend/
   migrations/
     202607270001_create_import_batches.sql
     202607270002_create_conversations.sql
+    202607270003_create_messages.sql
   tests/
     context_loading.rs
     context_gateway.rs
     conversations.rs
     import_batches.rs
+    messages.rs
 examples/
 docs/
   product.md
