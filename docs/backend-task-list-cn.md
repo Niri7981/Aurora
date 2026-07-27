@@ -37,10 +37,10 @@ Codex 从分析中提出记忆候选
 ## 当前指针
 
 ```text
-当前状态：第一个闭环 / ImportBatch 垂直切片已完成，等待复核
-当前任务：定义 ImportBatch 并创建 import_batches 表（已完成）
-下一步：定义 Conversation 并创建 conversations 表
-现在不要做：消息表、微信解析、MCP 聊天工具、长期记忆、数字替身面板
+当前状态：第一个闭环 / Conversation 垂直切片已完成，等待复核
+当前任务：定义 Conversation 并创建 conversations 表（已完成）
+下一步：定义 Message 并创建 messages 表
+现在不要做：微信解析、MCP 聊天工具、长期记忆、数字替身面板
 ```
 
 ## 已有基础
@@ -110,7 +110,7 @@ Codex 从分析中提出记忆候选
 目标：定义导入批次、会话、消息和授权分析范围，不涉及 MCP。
 
 - [x] 定义 `ImportBatch`
-- [ ] 定义 `Conversation`
+- [x] 定义 `Conversation`
 - [ ] 定义 `Message`
 - [ ] 定义 `AnalysisScope`
 - [ ] 明确消息发送者、时间、文本和原始顺序
@@ -129,7 +129,7 @@ Codex 从分析中提出记忆候选
 目标：能够保存和读取标准化聊天记录。
 
 - [x] 创建 `import_batches` 表
-- [ ] 创建 `conversations` 表
+- [x] 创建 `conversations` 表
 - [ ] 创建 `messages` 表
 - [ ] 创建 `analysis_scopes` 表
 - [ ] 为会话、时间和消息顺序建立索引

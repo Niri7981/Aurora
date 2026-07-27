@@ -118,6 +118,7 @@ backend/
     domain/
       context.rs
       context_pack.rs
+      conversation.rs
       disclosure.rs
       import_batch.rs
     infrastructure/
@@ -130,9 +131,11 @@ backend/
     config.rs
   migrations/
     202607270001_create_import_batches.sql
+    202607270002_create_conversations.sql
   tests/
     context_loading.rs
     context_gateway.rs
+    conversations.rs
     import_batches.rs
 examples/
 docs/
