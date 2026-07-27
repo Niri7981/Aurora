@@ -37,10 +37,10 @@ Codex 从分析中提出记忆候选
 ## 当前指针
 
 ```text
-当前状态：第一个闭环 / Milestone 1 / Docker 开发数据库已创建，等待复核
-当前任务：创建独立的 AuroraPulse PostgreSQL 开发数据库（已完成）
-下一步：1.3 增加后端数据库健康检查和集成测试配置
-现在不要做：聊天表、微信解析、MCP 聊天工具、长期记忆、数字替身面板
+当前状态：第一个闭环 / ImportBatch 垂直切片已完成，等待复核
+当前任务：定义 ImportBatch 并创建 import_batches 表（已完成）
+下一步：定义 Conversation 并创建 conversations 表
+现在不要做：消息表、微信解析、MCP 聊天工具、长期记忆、数字替身面板
 ```
 
 ## 已有基础
@@ -92,7 +92,7 @@ Codex 从分析中提出记忆候选
 
 - [ ] 增加数据库健康检查
 - [x] 创建本地 Docker 开发数据库
-- [ ] 增加 PostgreSQL 集成测试配置
+- [x] 增加 PostgreSQL 集成测试配置
 - [ ] 验证迁移可以从空数据库执行
 
 验收：
@@ -109,7 +109,7 @@ Codex 从分析中提出记忆候选
 
 目标：定义导入批次、会话、消息和授权分析范围，不涉及 MCP。
 
-- [ ] 定义 `ImportBatch`
+- [x] 定义 `ImportBatch`
 - [ ] 定义 `Conversation`
 - [ ] 定义 `Message`
 - [ ] 定义 `AnalysisScope`
@@ -128,7 +128,7 @@ Codex 从分析中提出记忆候选
 
 目标：能够保存和读取标准化聊天记录。
 
-- [ ] 创建 `import_batches` 表
+- [x] 创建 `import_batches` 表
 - [ ] 创建 `conversations` 表
 - [ ] 创建 `messages` 表
 - [ ] 创建 `analysis_scopes` 表
@@ -138,7 +138,7 @@ Codex 从分析中提出记忆候选
 - [ ] 实现原始文件哈希去重
 - [ ] 实现创建 Analysis Scope
 - [ ] 实现按 Scope 和游标分页读取消息
-- [ ] 增加真实 PostgreSQL 集成测试
+- [x] 增加真实 PostgreSQL 集成测试
 
 ## Milestone 4：标准聊天导入
 

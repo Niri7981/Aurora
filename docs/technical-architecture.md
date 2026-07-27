@@ -15,9 +15,11 @@ backend/src/application/context_gateway.rs     retrieval and disclosure orchestr
 backend/src/domain/context.rs                  local context domain data
 backend/src/domain/context_pack.rs             ContextPack domain data
 backend/src/domain/disclosure.rs               Disclosure Policy rules
+backend/src/domain/import_batch.rs              chat import batch domain data
 backend/src/infrastructure/local_context.rs     local file loading and initialization
 backend/src/infrastructure/audit_log.rs         JSONL Audit Event persistence
 backend/src/infrastructure/database/mod.rs      PostgreSQL pool and migrations
+backend/migrations/                             PostgreSQL schema migrations
 backend/src/lib.rs                              runtime assembly
 backend/src/main.rs                             process entrypoint
 ```
@@ -31,6 +33,8 @@ API adapters -> Application -> Domain
 ```
 
 The MCP adapter knows only the MCP protocol and the Context Gateway interface. Retrieval, disclosure, auditing, local files, PostgreSQL, and runtime assembly do not live in the MCP adapter.
+
+The first chat-source table is `import_batches`. It records one successfully imported source file through a UUID, source kind, original filename, SHA-256 content fingerprint, and import timestamp. Chat messages are not stored in this table.
 
 ## Runtime Flow
 

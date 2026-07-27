@@ -119,6 +119,7 @@ backend/
       context.rs
       context_pack.rs
       disclosure.rs
+      import_batch.rs
     infrastructure/
       audit_log.rs
       local_context.rs
@@ -127,9 +128,12 @@ backend/
     main.rs
     lib.rs
     config.rs
+  migrations/
+    202607270001_create_import_batches.sql
   tests/
     context_loading.rs
     context_gateway.rs
+    import_batches.rs
 examples/
 docs/
   product.md
