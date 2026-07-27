@@ -134,6 +134,7 @@ backend/
     202607270001_create_import_batches.sql
     202607270002_create_conversations.sql
     202607270003_create_messages.sql
+    202607270004_add_message_sender_kind.sql
   tests/
     context_loading.rs
     context_gateway.rs

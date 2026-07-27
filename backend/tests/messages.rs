@@ -1,10 +1,11 @@
-use aurora::domain::message::Message;
+use aurora::domain::message::{Message, MessageSenderKind};
 use sqlx::postgres::PgPoolOptions;
 
 type MessageRow = (
     uuid::Uuid,
     uuid::Uuid,
     i64,
+    String,
     String,
     String,
     chrono::DateTime<chrono::Utc>,
@@ -66,25 +67,39 @@ async fn migration_creates_ordered_messages_without_rewriting_content() {
         .expect("timestamp should be valid")
         .with_timezone(&chrono::Utc);
 
-    for (source_sequence, sender_key, sender_display_name, content_text) in [
-        (1_i64, "contact:li-si", "李四", "第二条"),
-        (0_i64, "self", "我", "  第一条原文保留空格  "),
+    for (source_sequence, sender_kind, sender_key, sender_display_name, content_text) in [
+        (
+            1_i64,
+            MessageSenderKind::Participant,
+            "contact:li-si",
+            "李四",
+            "第二条",
+        ),
+        (
+            0_i64,
+            MessageSenderKind::SelfUser,
+            "self",
+            "我",
+            "  第一条原文保留空格  ",
+        ),
     ] {
         sqlx::query(
             r#"
             INSERT INTO messages (
                 conversation_id,
                 source_sequence,
+                sender_kind,
                 sender_key,
                 sender_display_name,
                 sent_at,
                 content_text
             )
-            VALUES ($1, $2, $3, $4, $5, $6)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             "#,
         )
         .bind(conversation_id)
         .bind(source_sequence)
+        .bind(sender_kind.as_str())
         .bind(sender_key)
         .bind(sender_display_name)
         .bind(sent_at)
@@ -100,6 +115,7 @@ async fn migration_creates_ordered_messages_without_rewriting_content() {
             id,
             conversation_id,
             source_sequence,
+            sender_kind,
             sender_key,
             sender_display_name,
             sent_at,
@@ -121,20 +137,24 @@ async fn migration_creates_ordered_messages_without_rewriting_content() {
             id: row.0,
             conversation_id: row.1,
             source_sequence: row.2,
-            sender_key: row.3,
-            sender_display_name: row.4,
-            sent_at: row.5,
-            content_text: row.6,
-            created_at: row.7,
+            sender_kind: MessageSenderKind::try_from(row.3.as_str())
+                .expect("stored sender kind should be valid"),
+            sender_key: row.4,
+            sender_display_name: row.5,
+            sent_at: row.6,
+            content_text: row.7,
+            created_at: row.8,
         })
         .collect();
 
     assert_eq!(messages.len(), 2);
     assert_eq!(messages[0].source_sequence, 0);
+    assert_eq!(messages[0].sender_kind, MessageSenderKind::SelfUser);
     assert_eq!(messages[0].sender_key, "self");
     assert_eq!(messages[0].sender_display_name, "我");
     assert_eq!(messages[0].content_text, "  第一条原文保留空格  ");
     assert_eq!(messages[1].source_sequence, 1);
+    assert_eq!(messages[1].sender_kind, MessageSenderKind::Participant);
     assert_eq!(messages[1].content_text, "第二条");
 
     let duplicate = sqlx::query(
@@ -142,16 +162,18 @@ async fn migration_creates_ordered_messages_without_rewriting_content() {
         INSERT INTO messages (
             conversation_id,
             source_sequence,
+            sender_kind,
             sender_key,
             sender_display_name,
             sent_at,
             content_text
         )
-        VALUES ($1, $2, $3, $4, $5, $6)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         "#,
     )
     .bind(conversation_id)
     .bind(0_i64)
+    .bind(MessageSenderKind::Participant.as_str())
     .bind("contact:li-si")
     .bind("李四")
     .bind(sent_at)

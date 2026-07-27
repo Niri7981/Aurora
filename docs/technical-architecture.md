@@ -40,7 +40,7 @@ The first chat-source table is `import_batches`. It records one successfully imp
 
 The `conversations` table records the direct or group chats found in an import batch. A source conversation key is unique within its batch, so one imported file cannot create the same conversation twice. Message content remains outside this table.
 
-The `messages` table stores text messages in their original source order. Each message records a stable sender key, the sender name captured at import time, the source timestamp, and the unmodified text. Its conversation provides the path back to the originating import batch.
+The `messages` table stores text messages in their original source order. Each message explicitly distinguishes the user from another participant, then records a stable sender key, the sender name captured at import time, the source timestamp, and the unmodified text. Its conversation provides the path back to the originating import batch.
 
 ## Runtime Flow
 

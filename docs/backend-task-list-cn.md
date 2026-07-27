@@ -37,8 +37,8 @@ Codex 从分析中提出记忆候选
 ## 当前指针
 
 ```text
-当前状态：第一个闭环 / Message 垂直切片已完成，等待复核
-当前任务：定义 Message 并创建 messages 表（已完成）
+当前状态：第一个闭环 / Message 发送者身份补充已完成，等待复核
+当前任务：为 Message 明确区分本人和其他参与者（已完成）
 下一步：定义 AnalysisScope 并创建 analysis_scopes 表
 现在不要做：微信解析、MCP 聊天工具、长期记忆、数字替身面板
 ```
