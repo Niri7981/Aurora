@@ -18,6 +18,7 @@ backend/src/domain/disclosure.rs               Disclosure Policy rules
 backend/src/domain/import_batch.rs              chat import batch domain data
 backend/src/domain/conversation.rs              imported chat conversation domain data
 backend/src/domain/message.rs                   immutable imported text message data
+backend/src/domain/analysis_scope.rs            bounded, expiring chat analysis authorization
 backend/src/infrastructure/local_context.rs     local file loading and initialization
 backend/src/infrastructure/audit_log.rs         JSONL Audit Event persistence
 backend/src/infrastructure/database/mod.rs      PostgreSQL pool and migrations
@@ -41,6 +42,8 @@ The first chat-source table is `import_batches`. It records one successfully imp
 The `conversations` table records the direct or group chats found in an import batch. A source conversation key is unique within its batch, so one imported file cannot create the same conversation twice. Message content remains outside this table.
 
 The `messages` table stores text messages in their original source order. Each message explicitly distinguishes the user from another participant, then records a stable sender key, the sender name captured at import time, the source timestamp, and the unmodified text. Its conversation provides the path back to the originating import batch.
+
+The `analysis_scopes` table records one user-authorized conversation and a half-open message-time range. A scope has a declared purpose, expires automatically, and can be revoked early. Agents will receive the scope ID rather than choosing their own conversation and time range.
 
 ## Runtime Flow
 

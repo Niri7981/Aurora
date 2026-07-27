@@ -116,6 +116,7 @@ backend/
     application/
       context_gateway.rs
     domain/
+      analysis_scope.rs
       context.rs
       context_pack.rs
       conversation.rs
@@ -135,7 +136,9 @@ backend/
     202607270002_create_conversations.sql
     202607270003_create_messages.sql
     202607270004_add_message_sender_kind.sql
+    202607270005_create_analysis_scopes.sql
   tests/
+    analysis_scopes.rs
     context_loading.rs
     context_gateway.rs
     conversations.rs
