@@ -45,6 +45,8 @@ The `messages` table stores text messages in their original source order. Each m
 
 The `analysis_scopes` table records one user-authorized conversation and a half-open message-time range. A scope has a declared purpose, expires automatically, and can be revoked early. Agents will receive the scope ID rather than choosing their own conversation and time range.
 
+Messages have a composite index on conversation, send time, and source sequence. It matches the future scoped read path and keeps messages with identical timestamps in deterministic source order.
+
 ## Runtime Flow
 
 ```text

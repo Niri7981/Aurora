@@ -137,6 +137,7 @@ backend/
     202607270003_create_messages.sql
     202607270004_add_message_sender_kind.sql
     202607270005_create_analysis_scopes.sql
+    202607280001_add_message_scope_index.sql
   tests/
     analysis_scopes.rs
     context_loading.rs
@@ -144,6 +145,7 @@ backend/
     conversations.rs
     import_batches.rs
     messages.rs
+    message_indexes.rs
 examples/
 docs/
   product.md
