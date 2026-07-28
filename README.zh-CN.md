@@ -127,7 +127,9 @@ backend/
       audit_log.rs
       local_context.rs
       database/
+        conversation_repository.rs
         import_batch_repository.rs
+        message_repository.rs
         mod.rs
     main.rs
     lib.rs
@@ -141,6 +143,7 @@ backend/
     202607280001_add_message_scope_index.sql
   tests/
     analysis_scopes.rs
+    chat_write_repositories.rs
     context_loading.rs
     context_gateway.rs
     conversations.rs

@@ -24,6 +24,10 @@ backend/src/infrastructure/audit_log.rs         JSONL Audit Event persistence
 backend/src/infrastructure/database/mod.rs      PostgreSQL pool and migrations
 backend/src/infrastructure/database/import_batch_repository.rs
                                                 atomic import receipt persistence and deduplication
+backend/src/infrastructure/database/conversation_repository.rs
+                                                normalized conversation persistence
+backend/src/infrastructure/database/message_repository.rs
+                                                immutable text message persistence
 backend/migrations/                             PostgreSQL schema migrations
 backend/src/lib.rs                              runtime assembly
 backend/src/main.rs                             process entrypoint
@@ -50,6 +54,8 @@ The `analysis_scopes` table records one user-authorized conversation and a half-
 Messages have a composite index on conversation, send time, and source sequence. It matches the future scoped read path and keeps messages with identical timestamps in deterministic source order.
 
 `ImportBatchRepository` creates import receipts with `INSERT ... ON CONFLICT` and returns the existing receipt when a file hash has already been seen. It operates on a caller-owned SQLx connection so a later import service can commit or roll back the whole chat import atomically.
+
+`ConversationRepository` and `MessageRepository` map normalized domain values to explicit SQL inserts. They use the same caller-owned SQLx connection as the import receipt, keeping one imported chat inside a single transaction boundary.
 
 ## Runtime Flow
 
