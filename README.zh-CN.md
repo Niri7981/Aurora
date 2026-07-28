@@ -127,6 +127,7 @@ backend/
       audit_log.rs
       local_context.rs
       database/
+        import_batch_repository.rs
         mod.rs
     main.rs
     lib.rs
@@ -144,6 +145,7 @@ backend/
     context_gateway.rs
     conversations.rs
     import_batches.rs
+    import_batch_repository.rs
     messages.rs
     message_indexes.rs
 examples/

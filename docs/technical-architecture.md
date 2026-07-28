@@ -22,6 +22,8 @@ backend/src/domain/analysis_scope.rs            bounded, expiring chat analysis 
 backend/src/infrastructure/local_context.rs     local file loading and initialization
 backend/src/infrastructure/audit_log.rs         JSONL Audit Event persistence
 backend/src/infrastructure/database/mod.rs      PostgreSQL pool and migrations
+backend/src/infrastructure/database/import_batch_repository.rs
+                                                atomic import receipt persistence and deduplication
 backend/migrations/                             PostgreSQL schema migrations
 backend/src/lib.rs                              runtime assembly
 backend/src/main.rs                             process entrypoint
@@ -46,6 +48,8 @@ The `messages` table stores text messages in their original source order. Each m
 The `analysis_scopes` table records one user-authorized conversation and a half-open message-time range. A scope has a declared purpose, expires automatically, and can be revoked early. Agents will receive the scope ID rather than choosing their own conversation and time range.
 
 Messages have a composite index on conversation, send time, and source sequence. It matches the future scoped read path and keeps messages with identical timestamps in deterministic source order.
+
+`ImportBatchRepository` creates import receipts with `INSERT ... ON CONFLICT` and returns the existing receipt when a file hash has already been seen. It operates on a caller-owned SQLx connection so a later import service can commit or roll back the whole chat import atomically.
 
 ## Runtime Flow
 
