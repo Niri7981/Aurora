@@ -37,9 +37,9 @@ Codex 从分析中提出记忆候选
 ## 当前指针
 
 ```text
-当前状态：第一个闭环 / Conversation 和 Message Repository 已完成，等待复核
-当前任务：在调用方事务内保存标准化会话和消息（已完成）
-下一步：实现 AnalysisScope Repository，创建授权范围
+当前状态：第一个闭环 / AnalysisScope Repository 已完成，等待复核
+当前任务：在调用方事务内创建授权分析范围（已完成）
+下一步：实现按有效 Scope 和稳定游标分页读取消息
 现在不要做：微信解析、MCP 聊天工具、长期记忆、数字替身面板
 ```
 
@@ -136,7 +136,7 @@ Codex 从分析中提出记忆候选
 - [x] 实现新建导入批次
 - [x] 实现保存会话和消息
 - [x] 实现原始文件哈希去重
-- [ ] 实现创建 Analysis Scope
+- [x] 实现创建 Analysis Scope
 - [ ] 实现按 Scope 和游标分页读取消息
 - [x] 增加真实 PostgreSQL 集成测试
 

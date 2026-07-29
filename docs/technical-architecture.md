@@ -28,6 +28,8 @@ backend/src/infrastructure/database/conversation_repository.rs
                                                 normalized conversation persistence
 backend/src/infrastructure/database/message_repository.rs
                                                 immutable text message persistence
+backend/src/infrastructure/database/analysis_scope_repository.rs
+                                                bounded analysis authorization persistence
 backend/migrations/                             PostgreSQL schema migrations
 backend/src/lib.rs                              runtime assembly
 backend/src/main.rs                             process entrypoint
@@ -56,6 +58,8 @@ Messages have a composite index on conversation, send time, and source sequence.
 `ImportBatchRepository` creates import receipts with `INSERT ... ON CONFLICT` and returns the existing receipt when a file hash has already been seen. It operates on a caller-owned SQLx connection so a later import service can commit or roll back the whole chat import atomically.
 
 `ConversationRepository` and `MessageRepository` map normalized domain values to explicit SQL inserts. They use the same caller-owned SQLx connection as the import receipt, keeping one imported chat inside a single transaction boundary.
+
+`AnalysisScopeRepository` creates expiring, revocable authorization records for one conversation and one half-open message-time range. Scope creation also uses a caller-owned SQLx connection.
 
 ## Runtime Flow
 

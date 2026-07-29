@@ -1,6 +1,7 @@
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 
+pub mod analysis_scope_repository;
 pub mod conversation_repository;
 pub mod import_batch_repository;
 pub mod message_repository;
