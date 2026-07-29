@@ -131,6 +131,7 @@ backend/
         conversation_repository.rs
         import_batch_repository.rs
         message_repository.rs
+        scoped_message_repository.rs
         mod.rs
     main.rs
     lib.rs
@@ -153,6 +154,7 @@ backend/
     import_batch_repository.rs
     messages.rs
     message_indexes.rs
+    scoped_message_repository.rs
 examples/
 docs/
   product.md

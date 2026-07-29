@@ -30,6 +30,8 @@ backend/src/infrastructure/database/message_repository.rs
                                                 immutable text message persistence
 backend/src/infrastructure/database/analysis_scope_repository.rs
                                                 bounded analysis authorization persistence
+backend/src/infrastructure/database/scoped_message_repository.rs
+                                                fail-closed scoped message pagination
 backend/migrations/                             PostgreSQL schema migrations
 backend/src/lib.rs                              runtime assembly
 backend/src/main.rs                             process entrypoint
@@ -60,6 +62,8 @@ Messages have a composite index on conversation, send time, and source sequence.
 `ConversationRepository` and `MessageRepository` map normalized domain values to explicit SQL inserts. They use the same caller-owned SQLx connection as the import receipt, keeping one imported chat inside a single transaction boundary.
 
 `AnalysisScopeRepository` creates expiring, revocable authorization records for one conversation and one half-open message-time range. Scope creation also uses a caller-owned SQLx connection.
+
+`ScopedMessageRepository` checks scope validity and reads one bounded message page in the same SQL statement. It orders by send time and source sequence, limits pages to 100 messages, and returns one stable cursor only when another page exists.
 
 ## Runtime Flow
 
