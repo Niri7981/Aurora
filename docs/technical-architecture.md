@@ -65,6 +65,12 @@ Messages have a composite index on conversation, send time, and source sequence.
 
 `ScopedMessageRepository` checks scope validity and reads one bounded message page in the same SQL statement. It orders by send time and source sequence, limits pages to 100 messages, and returns one stable cursor only when another page exists.
 
+## Standard Chat Input
+
+`aurora.chat.v1` is the first normalized text-chat input contract. One UTF-8 JSON file contains a source label and one or more direct or group conversations. Messages carry contiguous source order, stable sender identity, an RFC 3339 timestamp, and original text. Aurora derives the filename, SHA-256 fingerprint, database IDs, and import time locally instead of trusting those values from the document.
+
+The complete contract is documented in [Aurora Chat JSON v1](aurora-chat-json-v1.md). A synthetic direct-and-group fixture lives under `backend/tests/fixtures/`.
+
 ## Runtime Flow
 
 ```text

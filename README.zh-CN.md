@@ -144,6 +144,8 @@ backend/
     202607270005_create_analysis_scopes.sql
     202607280001_add_message_scope_index.sql
   tests/
+    fixtures/
+      aurora-chat-v1.json
     analysis_scope_repository.rs
     analysis_scopes.rs
     chat_write_repositories.rs
@@ -155,8 +157,10 @@ backend/
     messages.rs
     message_indexes.rs
     scoped_message_repository.rs
+    standard_chat_fixture.rs
 examples/
 docs/
+  aurora-chat-json-v1.md
   product.md
   technical-architecture.md
   roadmap-cn.md

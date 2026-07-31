@@ -1,0 +1,70 @@
+{
+  "format": "aurora.chat.v1",
+  "source": "wechat",
+  "conversations": [
+    {
+      "key": "wechat:contact:test-friend",
+      "title": "我和测试好友",
+      "kind": "direct",
+      "messages": [
+        {
+          "sequence": 0,
+          "sender": {
+            "kind": "self",
+            "key": "self",
+            "display_name": "我"
+          },
+          "sent_at": "2025-01-01T10:00:00+08:00",
+          "text": "  原文首尾空格会保留  "
+        },
+        {
+          "sequence": 1,
+          "sender": {
+            "kind": "participant",
+            "key": "wechat:contact:test-friend",
+            "display_name": "测试好友"
+          },
+          "sent_at": "2025-01-01T10:01:00+08:00",
+          "text": "这是一段完全虚构的测试聊天。"
+        }
+      ]
+    },
+    {
+      "key": "wechat:group:test-study-group",
+      "title": "测试学习群",
+      "kind": "group",
+      "messages": [
+        {
+          "sequence": 0,
+          "sender": {
+            "kind": "participant",
+            "key": "wechat:contact:test-member-a",
+            "display_name": "测试成员甲"
+          },
+          "sent_at": "2025-02-01T09:00:00+08:00",
+          "text": "今天复习哪一章？"
+        },
+        {
+          "sequence": 1,
+          "sender": {
+            "kind": "self",
+            "key": "self",
+            "display_name": "我"
+          },
+          "sent_at": "2025-02-01T09:00:00+08:00",
+          "text": "先看第三章。"
+        },
+        {
+          "sequence": 2,
+          "sender": {
+            "kind": "participant",
+            "key": "wechat:contact:test-member-b",
+            "display_name": "测试成员乙"
+          },
+          "sent_at": "2025-02-01T09:02:00+08:00",
+          "text": "好的。"
+        }
+      ]
+    }
+  ]
+}
