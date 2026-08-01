@@ -125,6 +125,9 @@ backend/
       message.rs
     infrastructure/
       audit_log.rs
+      chat_import/
+        aurora_json.rs
+        mod.rs
       local_context.rs
       database/
         analysis_scope_repository.rs
@@ -148,6 +151,7 @@ backend/
       aurora-chat-v1.json
     analysis_scope_repository.rs
     analysis_scopes.rs
+    aurora_chat_json.rs
     chat_write_repositories.rs
     context_loading.rs
     context_gateway.rs

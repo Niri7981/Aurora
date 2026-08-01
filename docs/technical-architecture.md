@@ -21,6 +21,8 @@ backend/src/domain/message.rs                   immutable imported text message 
 backend/src/domain/analysis_scope.rs            bounded, expiring chat analysis authorization
 backend/src/infrastructure/local_context.rs     local file loading and initialization
 backend/src/infrastructure/audit_log.rs         JSONL Audit Event persistence
+backend/src/infrastructure/chat_import/aurora_json.rs
+                                                strict Aurora Chat JSON v1 source adapter
 backend/src/infrastructure/database/mod.rs      PostgreSQL pool and migrations
 backend/src/infrastructure/database/import_batch_repository.rs
                                                 atomic import receipt persistence and deduplication
@@ -70,6 +72,8 @@ Messages have a composite index on conversation, send time, and source sequence.
 `aurora.chat.v1` is the first normalized text-chat input contract. One UTF-8 JSON file contains a source label and one or more direct or group conversations. Messages carry contiguous source order, stable sender identity, an RFC 3339 timestamp, and original text. Aurora derives the filename, SHA-256 fingerprint, database IDs, and import time locally instead of trusting those values from the document.
 
 The complete contract is documented in [Aurora Chat JSON v1](aurora-chat-json-v1.md). A synthetic direct-and-group fixture lives under `backend/tests/fixtures/`.
+
+The JSON adapter rejects unknown fields and converts a valid document into typed conversations, senders, UTC timestamps, and messages. Semantic validation errors identify the exact field path; message text is checked without being rewritten.
 
 ## Runtime Flow
 
