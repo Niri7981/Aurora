@@ -5,6 +5,7 @@ pub mod analysis_scope_repository;
 pub mod conversation_repository;
 pub mod import_batch_repository;
 pub mod message_repository;
+pub mod profile_update_proposal_repository;
 pub mod scoped_message_repository;
 
 pub async fn connect_and_migrate() -> Result<PgPool, String> {

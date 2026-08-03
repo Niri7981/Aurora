@@ -38,8 +38,8 @@ Codex 从分析中提出记忆候选
 
 ```text
 当前状态：第一个 MCP 读取闭环已由用户验证；开始个人资料受控更新闭环
-当前任务：定义 ProfileUpdateProposal 领域模型和数据库表（已完成）
-下一步：实现 Proposal Repository，只允许创建和读取待处理提案
+当前任务：实现 Proposal Repository，只允许创建和读取提案（已完成）
+下一步：增加只能创建 pending 提案的 MCP 工具
 现在不要做：批准入口、资料文件写入、MCP 直接批准、管理页面
 ```
 
@@ -243,7 +243,7 @@ Agent 通过 MCP 创建 pending 提案
 - [x] 创建 `profile_update_proposals` 表
 - [x] 禁止把 `privacy_rules` 作为 Agent 提案目标
 - [x] 保留提案所依据的资料 SHA-256，供批准时检测并发修改
-- [ ] 实现 Proposal Repository
+- [x] 实现 Proposal Repository：创建、按 ID 读取、列出 pending 提案
 - [ ] 增加只能创建提案的 MCP 工具
 - [ ] 增加由用户触发的本地查看、批准和拒绝入口
 - [ ] 批准时校验版本、原子写文件并更新状态
