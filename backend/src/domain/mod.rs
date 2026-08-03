@@ -5,3 +5,4 @@ pub mod conversation;
 pub mod disclosure;
 pub mod import_batch;
 pub mod message;
+pub mod profile_update_proposal;
