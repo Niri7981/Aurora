@@ -5,6 +5,7 @@ pub mod domain;
 pub mod infrastructure;
 
 use application::context_gateway::ContextGateway;
+use application::profile_update_proposal_service::ProfileUpdateProposalService;
 use config::AppConfig;
 use infrastructure::database;
 
@@ -19,8 +20,9 @@ fn run_mcp(config: AppConfig) -> Result<(), String> {
         .build()
         .map_err(|error| format!("failed to start MCP runtime: {error}"))?;
     runtime.block_on(async move {
-        let _pool = database::connect_and_migrate().await?;
-        let gateway = ContextGateway::new(config, client);
-        api::mcp::serve(gateway).await
+        let pool = database::connect_and_migrate().await?;
+        let gateway = ContextGateway::new(config.clone(), client.clone());
+        let proposal_service = ProfileUpdateProposalService::new(config, client);
+        api::mcp::serve(gateway, proposal_service, pool).await
     })
 }
