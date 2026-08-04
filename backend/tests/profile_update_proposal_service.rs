@@ -60,6 +60,19 @@ async fn creates_a_pending_proposal_from_server_owned_profile_state() {
         format!("{:x}", Sha256::digest(current_content.as_bytes()))
     );
 
+    let found = service
+        .find_by_id(&mut transaction, proposal.id)
+        .await
+        .expect("proposal lookup should succeed")
+        .expect("created proposal should be found");
+    assert_eq!(found, proposal);
+
+    let pending = service
+        .list_pending(&mut transaction)
+        .await
+        .expect("pending proposals should be listed");
+    assert!(pending.iter().any(|item| item.id == proposal.id));
+
     let invalid_preferences = service
         .propose(
             &mut transaction,

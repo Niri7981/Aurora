@@ -7,8 +7,9 @@ use serde::{Deserialize, Serialize};
 use crate::application::context_gateway::ContextGateway;
 use crate::application::profile_update_proposal_service::ProfileUpdateProposalService;
 use crate::domain::context_pack::ContextPack;
-use crate::domain::profile_update_proposal::ProfileUpdateTarget;
+use crate::domain::profile_update_proposal::{ProfileUpdateProposal, ProfileUpdateTarget};
 use sqlx::PgPool;
+use uuid::Uuid;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct PurposeRequest {
@@ -36,12 +37,47 @@ struct ProposeProfileUpdateRequest {
     reason: String,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+struct GetProfileUpdateProposalRequest {
+    /// UUID returned when the proposal was created or listed.
+    proposal_id: String,
+}
+
 #[derive(Debug, Serialize, JsonSchema)]
 struct ProfileUpdateProposalReceipt {
     proposal_id: String,
     target: String,
     status: String,
     created_at: String,
+    message: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct ProfileUpdateProposalSummary {
+    proposal_id: String,
+    target: String,
+    reason: String,
+    proposed_by: String,
+    status: String,
+    created_at: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct PendingProfileUpdateProposalList {
+    proposals: Vec<ProfileUpdateProposalSummary>,
+    count: usize,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct ProfileUpdateProposalDetails {
+    proposal_id: String,
+    target: String,
+    proposed_content: String,
+    reason: String,
+    proposed_by: String,
+    status: String,
+    created_at: String,
+    decided_at: Option<String>,
     message: String,
 }
 
@@ -170,12 +206,72 @@ impl AuroraMcpServer {
             message: "Pending user approval; no profile file was changed.".to_string(),
         }))
     }
+
+    #[tool(
+        description = "List pending Aurora profile update proposals for the user to review. Returns summaries only and never changes proposal state or profile files.",
+        annotations(
+            title = "List pending Aurora profile updates",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn list_profile_update_proposals(
+        &self,
+    ) -> Result<Json<PendingProfileUpdateProposalList>, McpError> {
+        let mut connection = self.pool.acquire().await.map_err(|error| {
+            internal_mcp_error(format!("failed to acquire PostgreSQL connection: {error}"))
+        })?;
+        let proposals = self
+            .proposal_service
+            .list_pending(&mut connection)
+            .await
+            .map_err(internal_mcp_error)?;
+        let proposals = proposals
+            .iter()
+            .map(ProfileUpdateProposalSummary::from)
+            .collect::<Vec<_>>();
+        let count = proposals.len();
+
+        Ok(Json(PendingProfileUpdateProposalList { proposals, count }))
+    }
+
+    #[tool(
+        description = "Return one Aurora profile update proposal for user review, including its proposed replacement content. Read-only; this cannot approve, reject, or apply the proposal.",
+        annotations(
+            title = "Get an Aurora profile update proposal",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn get_profile_update_proposal(
+        &self,
+        Parameters(request): Parameters<GetProfileUpdateProposalRequest>,
+    ) -> Result<Json<ProfileUpdateProposalDetails>, McpError> {
+        let proposal_id = Uuid::parse_str(&request.proposal_id).map_err(|error| {
+            McpError::invalid_params(format!("proposal_id must be a UUID: {error}"), None)
+        })?;
+        let mut connection = self.pool.acquire().await.map_err(|error| {
+            internal_mcp_error(format!("failed to acquire PostgreSQL connection: {error}"))
+        })?;
+        let proposal = self
+            .proposal_service
+            .find_by_id(&mut connection, proposal_id)
+            .await
+            .map_err(internal_mcp_error)?
+            .ok_or_else(|| McpError::invalid_params("profile update proposal not found", None))?;
+
+        Ok(Json(ProfileUpdateProposalDetails::from(proposal)))
+    }
 }
 
 #[tool_handler(
     name = "aurora",
     version = "0.1.0",
-    instructions = "Aurora is the user's local identity and context authority. Call only when personal context materially helps the current request. State a narrow purpose, use the minimum returned context, respect omissions, and never claim access beyond the returned Context Pack."
+    instructions = "Aurora is the user's local identity and context authority. Read only the minimum context needed. Profile update tools may create and review pending proposals, but they never approve proposals or change profile files."
 )]
 impl ServerHandler for AuroraMcpServer {}
 
@@ -209,6 +305,35 @@ fn internal_mcp_error(error: String) -> McpError {
     McpError::internal_error(error, None)
 }
 
+impl From<&ProfileUpdateProposal> for ProfileUpdateProposalSummary {
+    fn from(proposal: &ProfileUpdateProposal) -> Self {
+        Self {
+            proposal_id: proposal.id.to_string(),
+            target: proposal.target.as_str().to_string(),
+            reason: proposal.reason.clone(),
+            proposed_by: proposal.proposed_by.clone(),
+            status: proposal.status.as_str().to_string(),
+            created_at: proposal.created_at.to_rfc3339(),
+        }
+    }
+}
+
+impl From<ProfileUpdateProposal> for ProfileUpdateProposalDetails {
+    fn from(proposal: ProfileUpdateProposal) -> Self {
+        Self {
+            proposal_id: proposal.id.to_string(),
+            target: proposal.target.as_str().to_string(),
+            proposed_content: proposal.proposed_content,
+            reason: proposal.reason,
+            proposed_by: proposal.proposed_by,
+            status: proposal.status.as_str().to_string(),
+            created_at: proposal.created_at.to_rfc3339(),
+            decided_at: proposal.decided_at.map(|value| value.to_rfc3339()),
+            message: "Review only; no proposal state or profile file was changed.".to_string(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::AuroraMcpServer;
@@ -238,5 +363,34 @@ mod tests {
         assert_eq!(annotations.destructive_hint, Some(false));
         assert_eq!(annotations.idempotent_hint, Some(false));
         assert_eq!(annotations.open_world_hint, Some(false));
+    }
+
+    #[test]
+    fn proposal_review_tools_are_read_only_and_cannot_accept_a_decision() {
+        let tools = AuroraMcpServer::tool_router().list_all();
+
+        for name in [
+            "list_profile_update_proposals",
+            "get_profile_update_proposal",
+        ] {
+            let tool = tools
+                .iter()
+                .find(|tool| tool.name == name)
+                .unwrap_or_else(|| panic!("{name} should be registered"));
+            let schema = serde_json::to_string(&tool.input_schema)
+                .expect("review tool input schema should serialize");
+            assert!(!schema.contains("approve"));
+            assert!(!schema.contains("reject"));
+            assert!(!schema.contains("status"));
+
+            let annotations = tool
+                .annotations
+                .as_ref()
+                .expect("review tool should declare annotations");
+            assert_eq!(annotations.read_only_hint, Some(true));
+            assert_eq!(annotations.destructive_hint, Some(false));
+            assert_eq!(annotations.idempotent_hint, Some(true));
+            assert_eq!(annotations.open_world_hint, Some(false));
+        }
     }
 }

@@ -4,6 +4,7 @@ use std::path::Path;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sqlx::PgConnection;
+use uuid::Uuid;
 
 use crate::config::AppConfig;
 use crate::domain::profile_update_proposal::{ProfileUpdateProposal, ProfileUpdateTarget};
@@ -49,6 +50,25 @@ impl ProfileUpdateProposalService {
         )
         .await
         .map_err(|error| format!("failed to create profile update proposal: {error}"))
+    }
+
+    pub async fn find_by_id(
+        &self,
+        connection: &mut PgConnection,
+        proposal_id: Uuid,
+    ) -> Result<Option<ProfileUpdateProposal>, String> {
+        ProfileUpdateProposalRepository::find_by_id(connection, proposal_id)
+            .await
+            .map_err(|error| format!("failed to read profile update proposal: {error}"))
+    }
+
+    pub async fn list_pending(
+        &self,
+        connection: &mut PgConnection,
+    ) -> Result<Vec<ProfileUpdateProposal>, String> {
+        ProfileUpdateProposalRepository::list_pending(connection)
+            .await
+            .map_err(|error| format!("failed to list profile update proposals: {error}"))
     }
 
     fn target_path(&self, target: ProfileUpdateTarget) -> &Path {
