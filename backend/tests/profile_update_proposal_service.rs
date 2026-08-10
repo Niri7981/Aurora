@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use aurora::application::profile_update_proposal_service::ProfileUpdateProposalService;
+use aurora::application::profile_update_proposal_service::{
+    ApplyProfileUpdateOutcome, ProfileUpdateProposalService,
+};
 use aurora::config::AppConfig;
 use aurora::domain::profile_update_proposal::{ProfileUpdateStatus, ProfileUpdateTarget};
 use sha2::{Digest, Sha256};
@@ -96,6 +98,98 @@ async fn creates_a_pending_proposal_from_server_owned_profile_state() {
         .rollback()
         .await
         .expect("transaction should roll back");
+}
+
+#[tokio::test]
+#[ignore = "requires the local Docker PostgreSQL database"]
+async fn applies_an_unchanged_proposal_and_marks_a_competing_proposal_stale() {
+    let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let pool = PgPoolOptions::new()
+        .max_connections(2)
+        .connect(&database_url)
+        .await
+        .expect("PostgreSQL should be available");
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await
+        .expect("migrations should run");
+
+    let config = test_config();
+    let original_content = "# Current focus\n\nReview pending proposals.\n";
+    let applied_content = "# Current focus\n\nApply approved proposals safely.\n";
+    write_file(&config.current_focus_path, original_content);
+    let service = ProfileUpdateProposalService::new(config.clone(), TEST_CLIENT);
+    let mut connection = pool
+        .acquire()
+        .await
+        .expect("connection should be available");
+    let first = service
+        .propose(
+            &mut connection,
+            ProfileUpdateTarget::CurrentFocus,
+            applied_content,
+            "Move to the approved apply step",
+        )
+        .await
+        .expect("first proposal should be created");
+    let competing = service
+        .propose(
+            &mut connection,
+            ProfileUpdateTarget::CurrentFocus,
+            "# Current focus\n\nThis proposal uses the old version.\n",
+            "Competing proposal for stale detection",
+        )
+        .await
+        .expect("competing proposal should be created");
+    drop(connection);
+
+    let first_outcome = service
+        .apply(&pool, first.id)
+        .await
+        .expect("unchanged proposal should apply");
+    let applied = match first_outcome {
+        ApplyProfileUpdateOutcome::Applied(proposal) => proposal,
+        other => panic!("expected applied outcome, got {other:?}"),
+    };
+    assert_eq!(applied.status, ProfileUpdateStatus::Applied);
+    assert!(applied.decided_at.is_some());
+    assert_eq!(
+        fs::read_to_string(&config.current_focus_path).expect("profile should be readable"),
+        applied_content
+    );
+
+    let competing_outcome = service
+        .apply(&pool, competing.id)
+        .await
+        .expect("competing proposal should be handled");
+    let stale = match competing_outcome {
+        ApplyProfileUpdateOutcome::Stale(proposal) => proposal,
+        other => panic!("expected stale outcome, got {other:?}"),
+    };
+    assert_eq!(stale.status, ProfileUpdateStatus::Stale);
+    assert!(stale.decided_at.is_some());
+    assert_eq!(
+        fs::read_to_string(&config.current_focus_path).expect("profile should be readable"),
+        applied_content,
+        "a stale proposal must not overwrite the current profile"
+    );
+
+    let repeated_outcome = service
+        .apply(&pool, first.id)
+        .await
+        .expect("repeated apply should return the existing state");
+    assert!(matches!(
+        repeated_outcome,
+        ApplyProfileUpdateOutcome::NotPending(proposal)
+            if proposal.status == ProfileUpdateStatus::Applied
+    ));
+
+    sqlx::query("DELETE FROM profile_update_proposals WHERE id = ANY($1)")
+        .bind(vec![first.id, competing.id])
+        .execute(&pool)
+        .await
+        .expect("test proposals should be removed");
+    fs::remove_dir_all(&config.workspace).expect("temporary profile directory should be removed");
 }
 
 fn test_config() -> AppConfig {

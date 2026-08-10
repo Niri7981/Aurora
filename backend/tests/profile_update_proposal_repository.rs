@@ -51,22 +51,22 @@ async fn creates_finds_and_lists_only_pending_profile_update_proposals() {
     .await
     .expect("second proposal should be created");
 
-    sqlx::query(
-        r#"
-        UPDATE profile_update_proposals
-        SET status = 'rejected', decided_at = CURRENT_TIMESTAMP
-        WHERE id = $1
-        "#,
+    let rejected = ProfileUpdateProposalRepository::transition_pending(
+        &mut transaction,
+        rejected.id,
+        ProfileUpdateStatus::Rejected,
     )
-    .bind(rejected.id)
-    .execute(&mut *transaction)
     .await
-    .expect("test proposal should be marked rejected");
+    .expect("test proposal should be marked rejected")
+    .expect("pending proposal should transition");
+    assert_eq!(rejected.status, ProfileUpdateStatus::Rejected);
+    assert!(rejected.decided_at.is_some());
 
-    let found = ProfileUpdateProposalRepository::find_by_id(&mut transaction, pending.id)
-        .await
-        .expect("proposal lookup should succeed")
-        .expect("created proposal should be found");
+    let found =
+        ProfileUpdateProposalRepository::find_by_id_for_update(&mut transaction, pending.id)
+            .await
+            .expect("proposal lookup should succeed")
+            .expect("created proposal should be found");
     assert_eq!(found, pending);
 
     let missing = ProfileUpdateProposalRepository::find_by_id(&mut transaction, uuid::Uuid::nil())
@@ -77,7 +77,8 @@ async fn creates_finds_and_lists_only_pending_profile_update_proposals() {
     let pending_proposals = ProfileUpdateProposalRepository::list_pending(&mut transaction)
         .await
         .expect("pending proposals should be listed");
-    assert_eq!(pending_proposals, vec![pending.clone()]);
+    assert!(pending_proposals.iter().any(|item| item == &pending));
+    assert!(pending_proposals.iter().all(|item| item.id != rejected.id));
 
     transaction
         .rollback()

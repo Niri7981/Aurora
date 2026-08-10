@@ -82,6 +82,75 @@ impl ProfileUpdateProposalRepository {
         .transpose()
     }
 
+    pub async fn find_by_id_for_update(
+        connection: &mut PgConnection,
+        proposal_id: Uuid,
+    ) -> Result<Option<ProfileUpdateProposal>, sqlx::Error> {
+        sqlx::query_as::<_, ProfileUpdateProposalRow>(
+            r#"
+            SELECT
+                id,
+                target,
+                base_sha256,
+                proposed_content,
+                reason,
+                proposed_by,
+                status,
+                created_at,
+                decided_at
+            FROM profile_update_proposals
+            WHERE id = $1
+            FOR UPDATE
+            "#,
+        )
+        .bind(proposal_id)
+        .fetch_optional(connection)
+        .await?
+        .map(TryInto::try_into)
+        .transpose()
+    }
+
+    pub async fn lock_target(
+        connection: &mut PgConnection,
+        target: ProfileUpdateTarget,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)")
+            .bind(target.as_str())
+            .execute(connection)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn transition_pending(
+        connection: &mut PgConnection,
+        proposal_id: Uuid,
+        status: ProfileUpdateStatus,
+    ) -> Result<Option<ProfileUpdateProposal>, sqlx::Error> {
+        let row = sqlx::query_as::<_, ProfileUpdateProposalRow>(
+            r#"
+            UPDATE profile_update_proposals
+            SET status = $2, decided_at = CURRENT_TIMESTAMP
+            WHERE id = $1 AND status = 'pending'
+            RETURNING
+                id,
+                target,
+                base_sha256,
+                proposed_content,
+                reason,
+                proposed_by,
+                status,
+                created_at,
+                decided_at
+            "#,
+        )
+        .bind(proposal_id)
+        .bind(status.as_str())
+        .fetch_optional(connection)
+        .await?;
+
+        row.map(TryInto::try_into).transpose()
+    }
+
     pub async fn list_pending(
         connection: &mut PgConnection,
     ) -> Result<Vec<ProfileUpdateProposal>, sqlx::Error> {

@@ -1,13 +1,23 @@
 use rmcp::{
-    ErrorData as McpError, Json, ServerHandler, ServiceExt, handler::server::wrapper::Parameters,
-    schemars::JsonSchema, tool, tool_handler, tool_router, transport::stdio,
+    ErrorData as McpError, Json, RoleServer, ServerHandler, ServiceExt,
+    handler::server::wrapper::Parameters,
+    model::{ElicitRequestParams, ElicitationAction, ElicitationSchema},
+    schemars::JsonSchema,
+    service::RequestContext,
+    tool, tool_handler, tool_router,
+    transport::stdio,
 };
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 use crate::application::context_gateway::ContextGateway;
-use crate::application::profile_update_proposal_service::ProfileUpdateProposalService;
+use crate::application::profile_update_proposal_service::{
+    ApplyProfileUpdateOutcome, ProfileUpdateProposalService,
+};
 use crate::domain::context_pack::ContextPack;
-use crate::domain::profile_update_proposal::{ProfileUpdateProposal, ProfileUpdateTarget};
+use crate::domain::profile_update_proposal::{
+    ProfileUpdateProposal, ProfileUpdateStatus, ProfileUpdateTarget,
+};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -40,6 +50,12 @@ struct ProposeProfileUpdateRequest {
 #[derive(Debug, Deserialize, JsonSchema)]
 struct GetProfileUpdateProposalRequest {
     /// UUID returned when the proposal was created or listed.
+    proposal_id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct ApplyProfileUpdateRequest {
+    /// UUID of a pending proposal the user has reviewed.
     proposal_id: String,
 }
 
@@ -78,6 +94,15 @@ struct ProfileUpdateProposalDetails {
     status: String,
     created_at: String,
     decided_at: Option<String>,
+    message: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct ApplyProfileUpdateResponse {
+    proposal_id: String,
+    target: String,
+    status: String,
+    applied: bool,
     message: String,
 }
 
@@ -266,12 +291,130 @@ impl AuroraMcpServer {
 
         Ok(Json(ProfileUpdateProposalDetails::from(proposal)))
     }
+
+    #[tool(
+        description = "Ask the user for independent confirmation, then apply one pending Aurora profile update. The Agent's tool call is not approval. Decline, cancellation, timeout, or a changed source file never overwrites the profile.",
+        annotations(
+            title = "Confirm and apply an Aurora profile update",
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn apply_profile_update(
+        &self,
+        Parameters(request): Parameters<ApplyProfileUpdateRequest>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<Json<ApplyProfileUpdateResponse>, McpError> {
+        let proposal_id = Uuid::parse_str(&request.proposal_id).map_err(|error| {
+            McpError::invalid_params(format!("proposal_id must be a UUID: {error}"), None)
+        })?;
+
+        let proposal = {
+            let mut connection = self.pool.acquire().await.map_err(|error| {
+                internal_mcp_error(format!("failed to acquire PostgreSQL connection: {error}"))
+            })?;
+            self.proposal_service
+                .find_by_id(&mut connection, proposal_id)
+                .await
+                .map_err(internal_mcp_error)?
+                .ok_or_else(|| {
+                    McpError::invalid_params("profile update proposal not found", None)
+                })?
+        };
+        if proposal.status != ProfileUpdateStatus::Pending {
+            return Err(McpError::invalid_params(
+                format!(
+                    "profile update proposal is already {}",
+                    proposal.status.as_str()
+                ),
+                None,
+            ));
+        }
+
+        let requested_schema = ElicitationSchema::builder()
+            .title("Aurora profile update confirmation")
+            .description("No form fields are required. Accept or decline this exact proposal.")
+            .build()
+            .map_err(|error| {
+                internal_mcp_error(format!("failed to build confirmation schema: {error}"))
+            })?;
+        let confirmation = context
+            .peer
+            .create_elicitation_with_timeout(
+                ElicitRequestParams::FormElicitationParams {
+                    meta: None,
+                    message: profile_update_confirmation_message(&proposal),
+                    requested_schema,
+                },
+                Some(Duration::from_secs(300)),
+            )
+            .await
+            .map_err(|error| {
+                internal_mcp_error(format!(
+                    "user confirmation was not completed; no profile was changed: {error}"
+                ))
+            })?;
+
+        match confirmation.action {
+            ElicitationAction::Decline | ElicitationAction::Cancel => {
+                return Ok(Json(ApplyProfileUpdateResponse {
+                    proposal_id: proposal.id.to_string(),
+                    target: proposal.target.as_str().to_string(),
+                    status: proposal.status.as_str().to_string(),
+                    applied: false,
+                    message: "User did not approve this operation; the proposal remains pending and no profile file was changed."
+                        .to_string(),
+                }));
+            }
+            ElicitationAction::Accept => {}
+            _ => {
+                return Err(internal_mcp_error(
+                    "unsupported confirmation response; no profile was changed".to_string(),
+                ));
+            }
+        }
+
+        match self
+            .proposal_service
+            .apply(&self.pool, proposal_id)
+            .await
+            .map_err(internal_mcp_error)?
+        {
+            ApplyProfileUpdateOutcome::Applied(proposal) => {
+                Ok(Json(ApplyProfileUpdateResponse::from_proposal(
+                    proposal,
+                    true,
+                    "User confirmed the operation; the profile was replaced and the proposal is applied.",
+                )))
+            }
+            ApplyProfileUpdateOutcome::Stale(proposal) => {
+                Ok(Json(ApplyProfileUpdateResponse::from_proposal(
+                    proposal,
+                    false,
+                    "The profile changed after this proposal was created. Nothing was overwritten; the proposal is stale.",
+                )))
+            }
+            ApplyProfileUpdateOutcome::NotPending(proposal) => {
+                Ok(Json(ApplyProfileUpdateResponse::from_proposal(
+                    proposal,
+                    false,
+                    "The proposal was decided while user confirmation was pending; no additional profile change was made.",
+                )))
+            }
+            ApplyProfileUpdateOutcome::NotFound => Err(McpError::invalid_params(
+                "profile update proposal no longer exists; no profile was changed",
+                None,
+            )),
+        }
+    }
 }
 
 #[tool_handler(
     name = "aurora",
     version = "0.1.0",
-    instructions = "Aurora is the user's local identity and context authority. Read only the minimum context needed. Profile update tools may create and review pending proposals, but they never approve proposals or change profile files."
+    instructions = "Aurora is the user's local identity and context authority. Read only the minimum context needed. Agents may create and review pending profile proposals. Applying one requires a separate user confirmation handled by the MCP client; the Agent's tool call is never approval."
 )]
 impl ServerHandler for AuroraMcpServer {}
 
@@ -305,6 +448,16 @@ fn internal_mcp_error(error: String) -> McpError {
     McpError::internal_error(error, None)
 }
 
+fn profile_update_confirmation_message(proposal: &ProfileUpdateProposal) -> String {
+    format!(
+        "Aurora is asking you—not the Agent—to approve a local profile change.\n\nProposal: {}\nTarget: {}\nReason: {}\n\nComplete replacement content:\n{}\n\nAccept only if you want Aurora to replace this profile document with exactly the content above. Aurora will recheck the original file version before writing.",
+        proposal.id,
+        proposal.target.as_str(),
+        proposal.reason,
+        proposal.proposed_content
+    )
+}
+
 impl From<&ProfileUpdateProposal> for ProfileUpdateProposalSummary {
     fn from(proposal: &ProfileUpdateProposal) -> Self {
         Self {
@@ -330,6 +483,18 @@ impl From<ProfileUpdateProposal> for ProfileUpdateProposalDetails {
             created_at: proposal.created_at.to_rfc3339(),
             decided_at: proposal.decided_at.map(|value| value.to_rfc3339()),
             message: "Review only; no proposal state or profile file was changed.".to_string(),
+        }
+    }
+}
+
+impl ApplyProfileUpdateResponse {
+    fn from_proposal(proposal: ProfileUpdateProposal, applied: bool, message: &str) -> Self {
+        Self {
+            proposal_id: proposal.id.to_string(),
+            target: proposal.target.as_str().to_string(),
+            status: proposal.status.as_str().to_string(),
+            applied,
+            message: message.to_string(),
         }
     }
 }
@@ -392,5 +557,31 @@ mod tests {
             assert_eq!(annotations.idempotent_hint, Some(true));
             assert_eq!(annotations.open_world_hint, Some(false));
         }
+    }
+
+    #[test]
+    fn apply_tool_only_accepts_a_proposal_id_and_is_destructive() {
+        let tools = AuroraMcpServer::tool_router().list_all();
+        let tool = tools
+            .iter()
+            .find(|tool| tool.name == "apply_profile_update")
+            .expect("apply tool should be registered");
+        let schema = serde_json::to_string(&tool.input_schema)
+            .expect("apply tool input schema should serialize");
+
+        assert!(schema.contains("proposal_id"));
+        assert!(!schema.contains("approve"));
+        assert!(!schema.contains("confirmed"));
+        assert!(!schema.contains("status"));
+        assert!(!schema.contains("proposed_content"));
+
+        let annotations = tool
+            .annotations
+            .as_ref()
+            .expect("apply tool should declare annotations");
+        assert_eq!(annotations.read_only_hint, Some(false));
+        assert_eq!(annotations.destructive_hint, Some(true));
+        assert_eq!(annotations.idempotent_hint, Some(false));
+        assert_eq!(annotations.open_world_hint, Some(false));
     }
 }
