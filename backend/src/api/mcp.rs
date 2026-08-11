@@ -5,7 +5,9 @@ use rmcp::{
 use serde::{Deserialize, Serialize};
 
 use crate::application::context_gateway::ContextGateway;
-use crate::application::profile_update_proposal_service::ProfileUpdateProposalService;
+use crate::application::profile_update_proposal_service::{
+    ApplyProfileUpdateOutcome, ProfileUpdateProposalService,
+};
 use crate::domain::context_pack::ContextPack;
 use crate::domain::profile_update_proposal::{ProfileUpdateProposal, ProfileUpdateTarget};
 use sqlx::PgPool;
@@ -31,7 +33,7 @@ struct SearchRequest {
 struct ProposeProfileUpdateRequest {
     /// Profile document to update: identity_card, current_focus, or preferences.
     target: String,
-    /// Complete replacement content to show the user for approval.
+    /// Complete replacement content to store before a separate apply call.
     proposed_content: String,
     /// Why this change would make the user's profile more accurate or useful.
     reason: String,
@@ -40,6 +42,12 @@ struct ProposeProfileUpdateRequest {
 #[derive(Debug, Deserialize, JsonSchema)]
 struct GetProfileUpdateProposalRequest {
     /// UUID returned when the proposal was created or listed.
+    proposal_id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct ApplyProfileUpdateRequest {
+    /// UUID of the pending proposal to apply exactly as stored.
     proposal_id: String,
 }
 
@@ -78,6 +86,15 @@ struct ProfileUpdateProposalDetails {
     status: String,
     created_at: String,
     decided_at: Option<String>,
+    message: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct ApplyProfileUpdateResponse {
+    proposal_id: String,
+    target: String,
+    status: String,
+    applied: bool,
     message: String,
 }
 
@@ -167,7 +184,7 @@ impl AuroraMcpServer {
     }
 
     #[tool(
-        description = "Create a pending proposal to replace one Aurora profile document. This never changes profile files, cannot approve its own proposal, and cannot target privacy rules.",
+        description = "Create a pending proposal containing the exact replacement for one Aurora profile document. This call never changes profile files and cannot target privacy rules; use apply_profile_update separately to execute it.",
         annotations(
             title = "Propose an Aurora profile update",
             read_only_hint = false,
@@ -203,7 +220,7 @@ impl AuroraMcpServer {
             target: proposal.target.as_str().to_string(),
             status: proposal.status.as_str().to_string(),
             created_at: proposal.created_at.to_rfc3339(),
-            message: "Pending user approval; no profile file was changed.".to_string(),
+            message: "Pending application; no profile file was changed.".to_string(),
         }))
     }
 
@@ -266,12 +283,64 @@ impl AuroraMcpServer {
 
         Ok(Json(ProfileUpdateProposalDetails::from(proposal)))
     }
+
+    #[tool(
+        description = "Apply one stored pending Aurora profile update proposal. This writes the proposal's exact content without an additional user confirmation prompt, while still rejecting privacy-rule targets and stale file versions.",
+        annotations(
+            title = "Apply an Aurora profile update",
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn apply_profile_update(
+        &self,
+        Parameters(request): Parameters<ApplyProfileUpdateRequest>,
+    ) -> Result<Json<ApplyProfileUpdateResponse>, McpError> {
+        let proposal_id = Uuid::parse_str(&request.proposal_id).map_err(|error| {
+            McpError::invalid_params(format!("proposal_id must be a UUID: {error}"), None)
+        })?;
+
+        match self
+            .proposal_service
+            .apply(&self.pool, proposal_id)
+            .await
+            .map_err(internal_mcp_error)?
+        {
+            ApplyProfileUpdateOutcome::Applied(proposal) => {
+                Ok(Json(ApplyProfileUpdateResponse::from_proposal(
+                    proposal,
+                    true,
+                    "The stored proposal was applied to the local profile.",
+                )))
+            }
+            ApplyProfileUpdateOutcome::Stale(proposal) => {
+                Ok(Json(ApplyProfileUpdateResponse::from_proposal(
+                    proposal,
+                    false,
+                    "The profile changed after this proposal was created. Nothing was overwritten; the proposal is stale.",
+                )))
+            }
+            ApplyProfileUpdateOutcome::NotPending(proposal) => {
+                Ok(Json(ApplyProfileUpdateResponse::from_proposal(
+                    proposal,
+                    false,
+                    "The proposal is no longer pending; no additional profile change was made.",
+                )))
+            }
+            ApplyProfileUpdateOutcome::NotFound => Err(McpError::invalid_params(
+                "profile update proposal not found",
+                None,
+            )),
+        }
+    }
 }
 
 #[tool_handler(
     name = "aurora",
     version = "0.1.0",
-    instructions = "Aurora is the user's local identity and context authority. Read only the minimum context needed. Agents may create and review pending profile proposals, but MCP cannot approve or apply them. The local user must run `aurora profile approve <proposal-id>` and type y."
+    instructions = "Aurora is the user's local identity and context authority. Read only the minimum context needed. Agents may create, review, and apply stored profile update proposals. Applying writes the proposal's exact content, checks the original file version, and cannot modify privacy rules."
 )]
 impl ServerHandler for AuroraMcpServer {}
 
@@ -330,6 +399,18 @@ impl From<ProfileUpdateProposal> for ProfileUpdateProposalDetails {
             created_at: proposal.created_at.to_rfc3339(),
             decided_at: proposal.decided_at.map(|value| value.to_rfc3339()),
             message: "Review only; no proposal state or profile file was changed.".to_string(),
+        }
+    }
+}
+
+impl ApplyProfileUpdateResponse {
+    fn from_proposal(proposal: ProfileUpdateProposal, applied: bool, message: &str) -> Self {
+        Self {
+            proposal_id: proposal.id.to_string(),
+            target: proposal.target.as_str().to_string(),
+            status: proposal.status.as_str().to_string(),
+            applied,
+            message: message.to_string(),
         }
     }
 }
@@ -395,13 +476,27 @@ mod tests {
     }
 
     #[test]
-    fn mcp_does_not_expose_profile_approval_or_apply_tools() {
+    fn apply_tool_only_accepts_a_proposal_id_and_is_destructive() {
         let tools = AuroraMcpServer::tool_router().list_all();
-        assert!(tools.iter().all(|tool| tool.name != "apply_profile_update"));
-        assert!(
-            tools
-                .iter()
-                .all(|tool| tool.name != "approve_profile_update")
-        );
+        let tool = tools
+            .iter()
+            .find(|tool| tool.name == "apply_profile_update")
+            .expect("apply tool should be registered");
+        let schema = serde_json::to_string(&tool.input_schema)
+            .expect("apply tool input schema should serialize");
+
+        assert!(schema.contains("proposal_id"));
+        assert!(!schema.contains("approved"));
+        assert!(!schema.contains("proposed_content"));
+        assert!(!schema.contains("target"));
+
+        let annotations = tool
+            .annotations
+            .as_ref()
+            .expect("apply tool should declare annotations");
+        assert_eq!(annotations.read_only_hint, Some(false));
+        assert_eq!(annotations.destructive_hint, Some(true));
+        assert_eq!(annotations.idempotent_hint, Some(false));
+        assert_eq!(annotations.open_world_hint, Some(false));
     }
 }

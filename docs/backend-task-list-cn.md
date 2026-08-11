@@ -38,9 +38,9 @@ Codex 从分析中提出记忆候选
 
 ```text
 当前状态：第一个 MCP 读取闭环已由用户验证；开始个人资料受控更新闭环
-当前任务：增加由本地用户输入 y 才能应用提案的 CLI 入口（已完成）
+当前任务：允许受信任 Agent 通过 MCP 应用已存储的 pending 提案（已完成）
 下一步：增加拒绝提案入口，并记录用户决定的审计事件
-现在不要做：MCP 批准或写入工具、绕过用户确认直接写入、管理页面
+现在不要做：绕过提案直接传入写入内容、修改 privacy_rules、管理页面
 ```
 
 ## 已有基础
@@ -228,15 +228,15 @@ read_chat_window      source.read.scoped
 
 ## 当前优先闭环：个人资料受控更新
 
-Agent 只能提出修改建议，不能批准自己的建议。首版由用户在 Aurora 本地 CLI 查看完整
-提案并输入 `y`，随后由 Aurora 校验版本并写入；不依赖 Agent 或管理页面。
+当前采用受信任 Agent 模式：Agent 可以提出并应用修改，但写入内容必须先固化为 pending
+提案。Aurora 不要求额外用户确认，仍负责限制目标、校验版本并原子写入。
 
 ```text
 Agent 通过 MCP 创建 pending 提案
     -> Agent 可以通过 MCP 列出和查看提案
-    -> 用户运行 aurora profile approve <proposal-id>
-    -> Aurora 展示完整替换内容
-    -> 只有用户输入 y 才校验原文件版本并写入
+    -> Agent 通过 MCP 应用指定 proposal_id
+    -> Aurora 读取已存储的完整替换内容
+    -> Aurora 校验原文件版本并写入
     -> 提案变为 applied、rejected 或 stale
 ```
 
@@ -247,8 +247,7 @@ Agent 通过 MCP 创建 pending 提案
 - [x] 实现 Proposal Repository：创建、按 ID 读取、列出 pending 提案
 - [x] 增加只能创建 pending 提案的 MCP 工具
 - [x] 增加 Agent 列出和查看提案的只读 MCP 工具
-- [x] 增加必须由本地用户输入 `y` 的 CLI 应用入口
-- [x] MCP 不暴露批准或应用工具
+- [x] 增加 Agent 可调用、只接受 `proposal_id` 的 MCP 应用工具
 - [x] 应用时校验版本、原子写文件并更新状态
 - [ ] 增加拒绝提案入口
 - [ ] 记录提案与用户决定的审计事件
