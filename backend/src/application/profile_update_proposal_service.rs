@@ -29,6 +29,13 @@ pub enum ApplyProfileUpdateOutcome {
     NotFound,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeleteProfileUpdateOutcome {
+    Deleted(ProfileUpdateProposal),
+    NotPending(ProfileUpdateProposal),
+    NotFound,
+}
+
 impl ProfileUpdateProposalService {
     pub fn new(config: AppConfig, client: impl Into<String>) -> Self {
         Self {
@@ -171,6 +178,55 @@ impl ProfileUpdateProposalService {
         }
 
         Ok(ApplyProfileUpdateOutcome::Applied(applied))
+    }
+
+    pub async fn delete_pending(
+        &self,
+        pool: &PgPool,
+        proposal_id: Uuid,
+    ) -> Result<DeleteProfileUpdateOutcome, String> {
+        let mut transaction = pool
+            .begin()
+            .await
+            .map_err(|error| format!("failed to start proposal deletion transaction: {error}"))?;
+        let proposal = match ProfileUpdateProposalRepository::find_by_id_for_update(
+            &mut transaction,
+            proposal_id,
+        )
+        .await
+        .map_err(|error| format!("failed to lock profile update proposal: {error}"))?
+        {
+            Some(proposal) => proposal,
+            None => {
+                transaction.rollback().await.map_err(|error| {
+                    format!("failed to close missing proposal transaction: {error}")
+                })?;
+                return Ok(DeleteProfileUpdateOutcome::NotFound);
+            }
+        };
+
+        if proposal.status != ProfileUpdateStatus::Pending {
+            transaction.rollback().await.map_err(|error| {
+                format!("failed to close retained proposal transaction: {error}")
+            })?;
+            return Ok(DeleteProfileUpdateOutcome::NotPending(proposal));
+        }
+
+        let deleted =
+            ProfileUpdateProposalRepository::delete_pending(&mut transaction, proposal.id)
+                .await
+                .map_err(|error| {
+                    format!("failed to delete pending profile update proposal: {error}")
+                })?;
+        if !deleted {
+            return Err("pending profile update proposal changed unexpectedly".to_string());
+        }
+        transaction
+            .commit()
+            .await
+            .map_err(|error| format!("failed to commit proposal deletion: {error}"))?;
+
+        Ok(DeleteProfileUpdateOutcome::Deleted(proposal))
     }
 
     fn target_path(&self, target: ProfileUpdateTarget) -> &Path {

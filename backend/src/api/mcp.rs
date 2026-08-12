@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::application::context_gateway::ContextGateway;
 use crate::application::profile_update_proposal_service::{
-    ApplyProfileUpdateOutcome, ProfileUpdateProposalService,
+    ApplyProfileUpdateOutcome, DeleteProfileUpdateOutcome, ProfileUpdateProposalService,
 };
 use crate::domain::context_pack::ContextPack;
 use crate::domain::profile_update_proposal::{ProfileUpdateProposal, ProfileUpdateTarget};
@@ -48,6 +48,12 @@ struct GetProfileUpdateProposalRequest {
 #[derive(Debug, Deserialize, JsonSchema)]
 struct ApplyProfileUpdateRequest {
     /// UUID of the pending proposal to apply exactly as stored.
+    proposal_id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct DeleteProfileUpdateProposalRequest {
+    /// UUID of the pending proposal to permanently delete.
     proposal_id: String,
 }
 
@@ -95,6 +101,14 @@ struct ApplyProfileUpdateResponse {
     target: String,
     status: String,
     applied: bool,
+    message: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct DeleteProfileUpdateProposalResponse {
+    proposal_id: String,
+    target: String,
+    deleted: bool,
     message: String,
 }
 
@@ -335,12 +349,58 @@ impl AuroraMcpServer {
             )),
         }
     }
+
+    #[tool(
+        description = "Permanently delete one pending Aurora profile update proposal. Applied and stale proposals are retained and cannot be deleted with this tool.",
+        annotations(
+            title = "Delete a pending Aurora profile update",
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn delete_profile_update_proposal(
+        &self,
+        Parameters(request): Parameters<DeleteProfileUpdateProposalRequest>,
+    ) -> Result<Json<DeleteProfileUpdateProposalResponse>, McpError> {
+        let proposal_id = Uuid::parse_str(&request.proposal_id).map_err(|error| {
+            McpError::invalid_params(format!("proposal_id must be a UUID: {error}"), None)
+        })?;
+
+        match self
+            .proposal_service
+            .delete_pending(&self.pool, proposal_id)
+            .await
+            .map_err(internal_mcp_error)?
+        {
+            DeleteProfileUpdateOutcome::Deleted(proposal) => {
+                Ok(Json(DeleteProfileUpdateProposalResponse {
+                    proposal_id: proposal.id.to_string(),
+                    target: proposal.target.as_str().to_string(),
+                    deleted: true,
+                    message: "The pending proposal was permanently deleted.".to_string(),
+                }))
+            }
+            DeleteProfileUpdateOutcome::NotPending(proposal) => Err(McpError::invalid_params(
+                format!(
+                    "only pending proposals can be deleted; proposal is {}",
+                    proposal.status.as_str()
+                ),
+                None,
+            )),
+            DeleteProfileUpdateOutcome::NotFound => Err(McpError::invalid_params(
+                "profile update proposal not found",
+                None,
+            )),
+        }
+    }
 }
 
 #[tool_handler(
     name = "aurora",
     version = "0.1.0",
-    instructions = "Aurora is the user's local identity and context authority. Read only the minimum context needed. Agents may create, review, and apply stored profile update proposals. Applying writes the proposal's exact content, checks the original file version, and cannot modify privacy rules."
+    instructions = "Aurora is the user's local identity and context authority. Read only the minimum context needed. Agents may create, review, apply, and delete pending profile update proposals. Applying writes the proposal's exact content, checks the original file version, and cannot modify privacy rules. Applied and stale records cannot be deleted."
 )]
 impl ServerHandler for AuroraMcpServer {}
 
@@ -494,6 +554,30 @@ mod tests {
             .annotations
             .as_ref()
             .expect("apply tool should declare annotations");
+        assert_eq!(annotations.read_only_hint, Some(false));
+        assert_eq!(annotations.destructive_hint, Some(true));
+        assert_eq!(annotations.idempotent_hint, Some(false));
+        assert_eq!(annotations.open_world_hint, Some(false));
+    }
+
+    #[test]
+    fn delete_tool_only_accepts_a_proposal_id_and_is_destructive() {
+        let tools = AuroraMcpServer::tool_router().list_all();
+        let tool = tools
+            .iter()
+            .find(|tool| tool.name == "delete_profile_update_proposal")
+            .expect("delete tool should be registered");
+        let schema = serde_json::to_string(&tool.input_schema)
+            .expect("delete tool input schema should serialize");
+
+        assert!(schema.contains("proposal_id"));
+        assert!(!schema.contains("status"));
+        assert!(!schema.contains("target"));
+
+        let annotations = tool
+            .annotations
+            .as_ref()
+            .expect("delete tool should declare annotations");
         assert_eq!(annotations.read_only_hint, Some(false));
         assert_eq!(annotations.destructive_hint, Some(true));
         assert_eq!(annotations.idempotent_hint, Some(false));

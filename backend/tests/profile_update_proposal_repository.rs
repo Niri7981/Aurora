@@ -80,6 +80,15 @@ async fn creates_finds_and_lists_only_pending_profile_update_proposals() {
     assert!(pending_proposals.iter().any(|item| item == &pending));
     assert!(pending_proposals.iter().all(|item| item.id != rejected.id));
 
+    let deleted = ProfileUpdateProposalRepository::delete_pending(&mut transaction, pending.id)
+        .await
+        .expect("pending proposal deletion should succeed");
+    assert!(deleted);
+    let retained = ProfileUpdateProposalRepository::delete_pending(&mut transaction, rejected.id)
+        .await
+        .expect("terminal proposal deletion should be checked");
+    assert!(!retained);
+
     transaction
         .rollback()
         .await

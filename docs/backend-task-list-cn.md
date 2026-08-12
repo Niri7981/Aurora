@@ -38,8 +38,8 @@ Codex 从分析中提出记忆候选
 
 ```text
 当前状态：第一个 MCP 读取闭环已由用户验证；开始个人资料受控更新闭环
-当前任务：允许受信任 Agent 通过 MCP 应用已存储的 pending 提案（已完成）
-下一步：增加拒绝提案入口，并记录用户决定的审计事件
+当前任务：允许 Agent 物理删除不再需要的 pending 提案（已完成）
+下一步：记录 Agent 应用与删除提案的审计事件
 现在不要做：绕过提案直接传入写入内容、修改 privacy_rules、管理页面
 ```
 
@@ -237,7 +237,9 @@ Agent 通过 MCP 创建 pending 提案
     -> Agent 通过 MCP 应用指定 proposal_id
     -> Aurora 读取已存储的完整替换内容
     -> Aurora 校验原文件版本并写入
-    -> 提案变为 applied、rejected 或 stale
+    -> 提案变为 applied 或 stale
+
+不再需要的 pending 提案可以直接物理删除；applied 和 stale 记录保留。
 ```
 
 - [x] 定义 `ProfileUpdateProposal`、可修改目标和状态
@@ -249,8 +251,8 @@ Agent 通过 MCP 创建 pending 提案
 - [x] 增加 Agent 列出和查看提案的只读 MCP 工具
 - [x] 增加 Agent 可调用、只接受 `proposal_id` 的 MCP 应用工具
 - [x] 应用时校验版本、原子写文件并更新状态
-- [ ] 增加拒绝提案入口
-- [ ] 记录提案与用户决定的审计事件
+- [x] 增加只能物理删除 pending 提案的 MCP 工具
+- [ ] 记录 Agent 应用与删除提案的审计事件
 
 ## 后续任务：现在不要做
 

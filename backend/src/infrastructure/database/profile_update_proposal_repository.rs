@@ -151,6 +151,23 @@ impl ProfileUpdateProposalRepository {
         row.map(TryInto::try_into).transpose()
     }
 
+    pub async fn delete_pending(
+        connection: &mut PgConnection,
+        proposal_id: Uuid,
+    ) -> Result<bool, sqlx::Error> {
+        let result = sqlx::query(
+            r#"
+            DELETE FROM profile_update_proposals
+            WHERE id = $1 AND status = 'pending'
+            "#,
+        )
+        .bind(proposal_id)
+        .execute(connection)
+        .await?;
+
+        Ok(result.rows_affected() == 1)
+    }
+
     pub async fn list_pending(
         connection: &mut PgConnection,
     ) -> Result<Vec<ProfileUpdateProposal>, sqlx::Error> {
