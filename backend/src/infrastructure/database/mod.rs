@@ -7,6 +7,7 @@ pub mod import_batch_repository;
 pub mod message_repository;
 pub mod profile_update_proposal_repository;
 pub mod scoped_message_repository;
+pub mod telegram_message_repository;
 
 pub async fn connect_and_migrate() -> Result<PgPool, String> {
     let database_url = required_database_url(std::env::var("DATABASE_URL").ok())?;

@@ -1,0 +1,71 @@
+use aurora::application::telegram_message_service::{SaveTelegramMessage, TelegramMessageService};
+use aurora::infrastructure::database::telegram_message_repository::SaveTelegramMessageOutcome;
+use chrono::{DateTime, Utc};
+use sqlx::postgres::PgPoolOptions;
+
+fn timestamp(value: &str) -> DateTime<Utc> {
+    DateTime::parse_from_rfc3339(value)
+        .expect("fixture timestamp should be valid")
+        .with_timezone(&Utc)
+}
+
+#[tokio::test]
+#[ignore = "requires the local Docker PostgreSQL database"]
+async fn saves_one_telegram_message_without_duplicating_its_source() {
+    let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&database_url)
+        .await
+        .expect("PostgreSQL should be available");
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await
+        .expect("migrations should run");
+
+    let mut transaction = pool.begin().await.expect("transaction should begin");
+    let fixture = SaveTelegramMessage {
+        channel_name: "Example jobs",
+        content_text: "A fictional company is hiring a Rust engineer.",
+        author_name: Some("Example recruiter"),
+        published_at: Some(timestamp("2026-08-07T23:27:00+08:00")),
+        external_message_id: Some("42"),
+        external_url: Some("https://t.me/example_jobs/42"),
+    };
+    let created = TelegramMessageService::save(&mut transaction, fixture)
+        .await
+        .expect("message should be saved");
+    let created = match created {
+        SaveTelegramMessageOutcome::Created(message) => message,
+        SaveTelegramMessageOutcome::AlreadyExists(_) => panic!("fixture should be new"),
+    };
+
+    let duplicate = TelegramMessageService::save(
+        &mut transaction,
+        SaveTelegramMessage {
+            content_text: "An improved extraction of the same fictional role.",
+            ..fixture
+        },
+    )
+    .await
+    .expect("duplicate source should be detected");
+    let duplicate = match duplicate {
+        SaveTelegramMessageOutcome::AlreadyExists(message) => message,
+        SaveTelegramMessageOutcome::Created(_) => panic!("duplicate should not be created"),
+    };
+    assert_eq!(duplicate.id, created.id);
+    assert_eq!(duplicate.content_text, created.content_text);
+
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM telegram_messages WHERE external_url = $1")
+            .bind("https://t.me/example_jobs/42")
+            .fetch_one(&mut *transaction)
+            .await
+            .expect("saved message count should be readable");
+    assert_eq!(count, 1);
+
+    transaction
+        .rollback()
+        .await
+        .expect("transaction should roll back");
+}

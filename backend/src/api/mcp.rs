@@ -8,8 +8,11 @@ use crate::application::context_gateway::ContextGateway;
 use crate::application::profile_update_proposal_service::{
     ApplyProfileUpdateOutcome, DeleteProfileUpdateOutcome, ProfileUpdateProposalService,
 };
+use crate::application::telegram_message_service::{SaveTelegramMessage, TelegramMessageService};
 use crate::domain::context_pack::ContextPack;
 use crate::domain::profile_update_proposal::{ProfileUpdateProposal, ProfileUpdateTarget};
+use crate::infrastructure::database::telegram_message_repository::SaveTelegramMessageOutcome;
+use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -55,6 +58,22 @@ struct ApplyProfileUpdateRequest {
 struct DeleteProfileUpdateProposalRequest {
     /// UUID of the pending proposal to permanently delete.
     proposal_id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct SaveTelegramMessageRequest {
+    /// Name of the Telegram channel shown on the forwarded message.
+    channel_name: String,
+    /// Complete text extracted from the single forwarded message, including relevant image text.
+    content_text: String,
+    /// Original author shown in the forwarded content, when available.
+    author_name: Option<String>,
+    /// Original publication time as an RFC 3339 timestamp, when available.
+    published_at: Option<String>,
+    /// Telegram's original message identifier, when available.
+    external_message_id: Option<String>,
+    /// Original source URL shown in the forwarded message, when available.
+    external_url: Option<String>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -109,6 +128,15 @@ struct DeleteProfileUpdateProposalResponse {
     proposal_id: String,
     target: String,
     deleted: bool,
+    message: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct SaveTelegramMessageResponse {
+    message_id: String,
+    status: String,
+    channel_name: String,
+    saved_at: String,
     message: String,
 }
 
@@ -195,6 +223,82 @@ impl AuroraMcpServer {
             .search_personal_context(&request.query, &request.purpose, request.max_items)
             .map(Json)
             .map_err(internal_mcp_error)
+    }
+
+    #[tool(
+        description = "Save exactly one Telegram message that the user explicitly asked to store in Aurora. Extract the complete text from the current forwarded message before calling. This stores source material separately from the user's identity, focus, preferences, and privacy rules.",
+        annotations(
+            title = "Save one Telegram message",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn save_telegram_message(
+        &self,
+        Parameters(request): Parameters<SaveTelegramMessageRequest>,
+    ) -> Result<Json<SaveTelegramMessageResponse>, McpError> {
+        validate_mcp_bounded_text(&request.channel_name, "channel_name", 500)?;
+        validate_mcp_bounded_text(&request.content_text, "content_text", 50_000)?;
+        validate_optional_mcp_bounded_text(request.author_name.as_deref(), "author_name", 500)?;
+        validate_optional_mcp_bounded_text(
+            request.external_message_id.as_deref(),
+            "external_message_id",
+            500,
+        )?;
+        validate_optional_mcp_bounded_text(request.external_url.as_deref(), "external_url", 2_048)?;
+        let published_at = request
+            .published_at
+            .as_deref()
+            .map(|value| {
+                DateTime::parse_from_rfc3339(value)
+                    .map(|value| value.with_timezone(&Utc))
+                    .map_err(|error| {
+                        McpError::invalid_params(
+                            format!("published_at must be an RFC 3339 timestamp: {error}"),
+                            None,
+                        )
+                    })
+            })
+            .transpose()?;
+        let mut connection = self.pool.acquire().await.map_err(|error| {
+            internal_mcp_error(format!("failed to acquire PostgreSQL connection: {error}"))
+        })?;
+        let outcome = TelegramMessageService::save(
+            &mut connection,
+            SaveTelegramMessage {
+                channel_name: &request.channel_name,
+                content_text: &request.content_text,
+                author_name: request.author_name.as_deref(),
+                published_at,
+                external_message_id: request.external_message_id.as_deref(),
+                external_url: request.external_url.as_deref(),
+            },
+        )
+        .await
+        .map_err(internal_mcp_error)?;
+
+        let (message, status, receipt) = match outcome {
+            SaveTelegramMessageOutcome::Created(message) => (
+                message,
+                "created",
+                "The Telegram message was saved separately from the user's profile.",
+            ),
+            SaveTelegramMessageOutcome::AlreadyExists(message) => (
+                message,
+                "already_exists",
+                "The Telegram message was already stored; no duplicate was created.",
+            ),
+        };
+
+        Ok(Json(SaveTelegramMessageResponse {
+            message_id: message.id.to_string(),
+            status: status.to_string(),
+            channel_name: message.channel_name,
+            saved_at: message.saved_at.to_rfc3339(),
+            message: receipt.to_string(),
+        }))
     }
 
     #[tool(
@@ -400,7 +504,7 @@ impl AuroraMcpServer {
 #[tool_handler(
     name = "aurora",
     version = "0.1.0",
-    instructions = "Aurora is the user's local identity and context authority. Read only the minimum context needed. Agents may create, review, apply, and delete pending profile update proposals. Applying writes the proposal's exact content, checks the original file version, and cannot modify privacy rules. Applied and stale records cannot be deleted."
+    instructions = "Aurora is the user's local identity and context authority. Read only the minimum context needed. Save a Telegram message only after the user explicitly asks to store that single forwarded message; Telegram source material is kept separate from profile documents. Agents may create, review, apply, and delete pending profile update proposals. Applying writes the proposal's exact content, checks the original file version, and cannot modify privacy rules. Applied and stale records cannot be deleted."
 )]
 impl ServerHandler for AuroraMcpServer {}
 
@@ -428,6 +532,34 @@ fn validate_mcp_text(value: &str, field: &str) -> Result<(), McpError> {
         ));
     }
     Ok(())
+}
+
+fn validate_mcp_bounded_text(value: &str, field: &str, max_chars: usize) -> Result<(), McpError> {
+    validate_mcp_text(value, field)?;
+    if value.trim() != value {
+        return Err(McpError::invalid_params(
+            format!("{field} must not have leading or trailing whitespace"),
+            None,
+        ));
+    }
+    if value.chars().count() > max_chars {
+        return Err(McpError::invalid_params(
+            format!("{field} must be at most {max_chars} characters"),
+            None,
+        ));
+    }
+    Ok(())
+}
+
+fn validate_optional_mcp_bounded_text(
+    value: Option<&str>,
+    field: &str,
+    max_chars: usize,
+) -> Result<(), McpError> {
+    match value {
+        Some(value) => validate_mcp_bounded_text(value, field, max_chars),
+        None => Ok(()),
+    }
 }
 
 fn internal_mcp_error(error: String) -> McpError {
@@ -503,6 +635,40 @@ mod tests {
         assert_eq!(annotations.read_only_hint, Some(false));
         assert_eq!(annotations.destructive_hint, Some(false));
         assert_eq!(annotations.idempotent_hint, Some(false));
+        assert_eq!(annotations.open_world_hint, Some(false));
+    }
+
+    #[test]
+    fn telegram_save_tool_is_narrow_idempotent_and_non_destructive() {
+        let tools = AuroraMcpServer::tool_router().list_all();
+        let tool = tools
+            .iter()
+            .find(|tool| tool.name == "save_telegram_message")
+            .expect("Telegram save tool should be registered");
+        let schema = serde_json::to_string(&tool.input_schema)
+            .expect("Telegram save input schema should serialize");
+
+        for field in [
+            "channel_name",
+            "content_text",
+            "author_name",
+            "published_at",
+            "external_message_id",
+            "external_url",
+        ] {
+            assert!(schema.contains(field));
+        }
+        assert!(!schema.contains("identity_card"));
+        assert!(!schema.contains("preferences"));
+        assert!(!schema.contains("privacy_rules"));
+
+        let annotations = tool
+            .annotations
+            .as_ref()
+            .expect("Telegram save tool should declare annotations");
+        assert_eq!(annotations.read_only_hint, Some(false));
+        assert_eq!(annotations.destructive_hint, Some(false));
+        assert_eq!(annotations.idempotent_hint, Some(true));
         assert_eq!(annotations.open_world_hint, Some(false));
     }
 

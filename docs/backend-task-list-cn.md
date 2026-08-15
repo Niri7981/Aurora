@@ -37,10 +37,10 @@ Codex 从分析中提出记忆候选
 ## 当前指针
 
 ```text
-当前状态：第一个 MCP 读取闭环已由用户验证；开始个人资料受控更新闭环
-当前任务：允许 Agent 物理删除不再需要的 pending 提案（已完成）
-下一步：记录 Agent 应用与删除提案的审计事件
-现在不要做：绕过提案直接传入写入内容、修改 privacy_rules、管理页面
+当前状态：Telegram → Hermes → Aurora MCP 已由用户验证；开始单条来源消息收藏闭环
+当前任务：保存用户明确指定的单条 Telegram 消息（已完成）
+下一步：通过 MCP 搜索已保存的 Telegram 消息
+现在不要做：自动收藏消息、写入个人画像、修改 privacy_rules、同步整个 Telegram 频道
 ```
 
 ## 已有基础
@@ -253,6 +253,28 @@ Agent 通过 MCP 创建 pending 提案
 - [x] 应用时校验版本、原子写文件并更新状态
 - [x] 增加只能物理删除 pending 提案的 MCP 工具
 - [ ] 记录 Agent 应用与删除提案的审计事件
+
+## 当前优先闭环：Telegram 单条消息收藏
+
+Telegram 消息属于外部来源资料，不属于用户的长期个人画像。只有用户明确要求保存当前
+转发消息时，Agent 才能调用写入工具。
+
+```text
+用户向 Hermes 转发一条 Telegram 消息
+    -> 用户明确要求保存到 Aurora
+    -> Hermes 提取频道、正文、作者、时间和来源标识
+    -> Aurora 幂等写入 PostgreSQL
+    -> 后续 Agent 可以搜索并引用该消息
+```
+
+- [x] 定义独立的 `TelegramMessage`，不写入个人画像文件
+- [x] 创建 `telegram_messages` 表
+- [x] 按原始链接、频道内消息 ID 或内容特征幂等去重
+- [x] 新增 `save_telegram_message` MCP 工具
+- [x] 限制为一次保存一条消息，并要求用户明确指示
+- [x] 增加匿名测试，不使用真实 Telegram 消息
+- [ ] 新增 `search_telegram_messages` MCP 工具
+- [ ] 由用户通过 Telegram 中的 Hermes 完成真实保存验证
 
 ## 后续任务：现在不要做
 
