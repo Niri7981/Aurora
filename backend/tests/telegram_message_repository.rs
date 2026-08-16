@@ -1,5 +1,8 @@
 use aurora::application::telegram_message_service::{SaveTelegramMessage, TelegramMessageService};
 use aurora::infrastructure::database::telegram_message_repository::SaveTelegramMessageOutcome;
+use aurora::infrastructure::database::telegram_message_repository::{
+    SearchTelegramMessages, TelegramMessageRepository,
+};
 use chrono::{DateTime, Utc};
 use sqlx::postgres::PgPoolOptions;
 
@@ -63,6 +66,37 @@ async fn saves_one_telegram_message_without_duplicating_its_source() {
             .await
             .expect("saved message count should be readable");
     assert_eq!(count, 1);
+
+    let terms = vec!["rust".to_string()];
+    let found = TelegramMessageRepository::search(
+        &mut transaction,
+        SearchTelegramMessages {
+            terms: &terms,
+            channel_name: Some("Example jobs"),
+            starts_at: Some(timestamp("2026-08-01T00:00:00Z")),
+            ends_at: Some(timestamp("2026-09-01T00:00:00Z")),
+            limit: 10,
+        },
+    )
+    .await
+    .expect("saved message should be searchable");
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].id, created.id);
+
+    let missing_terms = vec!["python".to_string()];
+    let missing = TelegramMessageRepository::search(
+        &mut transaction,
+        SearchTelegramMessages {
+            terms: &missing_terms,
+            channel_name: Some("Example jobs"),
+            starts_at: None,
+            ends_at: None,
+            limit: 10,
+        },
+    )
+    .await
+    .expect("unmatched search should succeed");
+    assert!(missing.is_empty());
 
     transaction
         .rollback()

@@ -41,7 +41,7 @@ impl ContextGateway {
             .as_ref()
             .map(|document| vec![("identity", document)])
             .unwrap_or_default();
-        self.build_and_audit_pack("get_identity", purpose, None, &context, documents)
+        self.build_pack(Some("get_identity"), purpose, None, &context, documents)
     }
 
     pub fn get_current_focus(&self, purpose: &str) -> Result<ContextPack, String> {
@@ -52,7 +52,13 @@ impl ContextGateway {
             .as_ref()
             .map(|document| vec![("current_focus", document)])
             .unwrap_or_default();
-        self.build_and_audit_pack("get_current_focus", purpose, None, &context, documents)
+        self.build_pack(
+            Some("get_current_focus"),
+            purpose,
+            None,
+            &context,
+            documents,
+        )
     }
 
     pub fn search_personal_context(
@@ -61,9 +67,32 @@ impl ContextGateway {
         purpose: &str,
         max_items: Option<usize>,
     ) -> Result<ContextPack, String> {
+        self.search_personal_context_with_audit(query, purpose, max_items, true)
+    }
+
+    pub(crate) fn search_personal_context_unlogged(
+        &self,
+        query: &str,
+        purpose: &str,
+        max_items: Option<usize>,
+    ) -> Result<ContextPack, String> {
+        self.search_personal_context_with_audit(query, purpose, max_items, false)
+    }
+
+    fn search_personal_context_with_audit(
+        &self,
+        query: &str,
+        purpose: &str,
+        max_items: Option<usize>,
+        audit: bool,
+    ) -> Result<ContextPack, String> {
         let query = required_text(query, "query")?;
         let purpose = required_text(purpose, "purpose")?;
-        let context = self.load_context("search_personal_context", purpose, Some(query))?;
+        let context = if audit {
+            self.load_context("search_personal_context", purpose, Some(query))?
+        } else {
+            local_context::load(&self.config)?
+        };
         let mut documents = scored_documents(&context, query, purpose);
         let limit = max_items
             .unwrap_or(DEFAULT_SEARCH_LIMIT)
@@ -74,8 +103,8 @@ impl ContextGateway {
             .map(|candidate| (candidate.category, candidate.document))
             .collect();
 
-        self.build_and_audit_pack(
-            "search_personal_context",
+        self.build_pack(
+            audit.then_some("search_personal_context"),
             purpose,
             Some(query),
             &context,
@@ -99,9 +128,9 @@ impl ContextGateway {
         }
     }
 
-    fn build_and_audit_pack(
+    fn build_pack(
         &self,
-        tool: &str,
+        tool: Option<&str>,
         purpose: &str,
         query: Option<&str>,
         context: &LocalContext,
@@ -143,7 +172,9 @@ impl ContextGateway {
             omissions,
         };
 
-        self.audit_log.append_success(&self.client, tool, &pack)?;
+        if let Some(tool) = tool {
+            self.audit_log.append_success(&self.client, tool, &pack)?;
+        }
         Ok(pack)
     }
 

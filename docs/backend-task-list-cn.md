@@ -37,9 +37,9 @@ Codex 从分析中提出记忆候选
 ## 当前指针
 
 ```text
-当前状态：Telegram → Hermes → Aurora MCP 已由用户验证；开始单条来源消息收藏闭环
-当前任务：保存用户明确指定的单条 Telegram 消息（已完成）
-下一步：通过 MCP 搜索已保存的 Telegram 消息
+当前状态：Telegram 单条保存已由用户验证；外部消息已进入 Aurora 独立资料库
+当前任务：新增带来源标注的 Aurora 全局 MCP 搜索（已完成）
+下一步：由用户通过 Telegram 中的 Hermes 验证真实搜索和来源引用
 现在不要做：自动收藏消息、写入个人画像、修改 privacy_rules、同步整个 Telegram 频道
 ```
 
@@ -254,7 +254,7 @@ Agent 通过 MCP 创建 pending 提案
 - [x] 增加只能物理删除 pending 提案的 MCP 工具
 - [ ] 记录 Agent 应用与删除提案的审计事件
 
-## 当前优先闭环：Telegram 单条消息收藏
+## 当前优先闭环：带来源标注的全局搜索
 
 Telegram 消息属于外部来源资料，不属于用户的长期个人画像。只有用户明确要求保存当前
 转发消息时，Agent 才能调用写入工具。
@@ -264,7 +264,7 @@ Telegram 消息属于外部来源资料，不属于用户的长期个人画像�
     -> 用户明确要求保存到 Aurora
     -> Hermes 提取频道、正文、作者、时间和来源标识
     -> Aurora 幂等写入 PostgreSQL
-    -> 后续 Agent 可以搜索并引用该消息
+    -> 后续 Agent 通过统一入口搜索并引用该消息
 ```
 
 - [x] 定义独立的 `TelegramMessage`，不写入个人画像文件
@@ -273,8 +273,13 @@ Telegram 消息属于外部来源资料，不属于用户的长期个人画像�
 - [x] 新增 `save_telegram_message` MCP 工具
 - [x] 限制为一次保存一条消息，并要求用户明确指示
 - [x] 增加匿名测试，不使用真实 Telegram 消息
-- [ ] 新增 `search_telegram_messages` MCP 工具
-- [ ] 由用户通过 Telegram 中的 Hermes 完成真实保存验证
+- [x] 由用户通过 Telegram 中的 Hermes 完成真实保存验证
+- [x] 新增统一的 `search_aurora` MCP 工具，不增加来源专用搜索工具
+- [x] 同时搜索授权的个人资料与 Telegram 外部消息
+- [x] 每条搜索结果由服务端附加来源标识
+- [x] 支持按资料类型、频道和时间范围缩小搜索范围
+- [x] 搜索行为写入披露审计；不暴露隐私规则、提案和内部版本字段
+- [ ] 由用户通过 Telegram 中的 Hermes 验证真实全局搜索和来源引用
 
 ## 后续任务：现在不要做
 

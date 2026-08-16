@@ -4,6 +4,7 @@ use rmcp::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::application::aurora_search_service::{AuroraSearchService, SearchAurora};
 use crate::application::context_gateway::ContextGateway;
 use crate::application::profile_update_proposal_service::{
     ApplyProfileUpdateOutcome, DeleteProfileUpdateOutcome, ProfileUpdateProposalService,
@@ -30,6 +31,24 @@ struct SearchRequest {
     purpose: String,
     /// Maximum number of context items to return. Values above 6 are clamped.
     max_items: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct GlobalSearchRequest {
+    /// What to find across Aurora's authorized information.
+    query: String,
+    /// Why the Agent needs these results for the current user request.
+    purpose: String,
+    /// Optional source filters: personal_context and/or telegram. Omit to search both.
+    source_types: Option<Vec<String>>,
+    /// Optional exact Telegram channel name filter.
+    channel_name: Option<String>,
+    /// Optional inclusive lower publication-time bound as RFC 3339.
+    from: Option<String>,
+    /// Optional exclusive upper publication-time bound as RFC 3339.
+    to: Option<String>,
+    /// Maximum combined results. Defaults to 10 and is capped at 25.
+    max_results: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -143,6 +162,7 @@ struct SaveTelegramMessageResponse {
 #[derive(Clone)]
 pub struct AuroraMcpServer {
     gateway: ContextGateway,
+    search_service: AuroraSearchService,
     proposal_service: ProfileUpdateProposalService,
     pool: PgPool,
 }
@@ -151,11 +171,13 @@ pub struct AuroraMcpServer {
 impl AuroraMcpServer {
     pub fn new(
         gateway: ContextGateway,
+        search_service: AuroraSearchService,
         proposal_service: ProfileUpdateProposalService,
         pool: PgPool,
     ) -> Self {
         Self {
             gateway,
+            search_service,
             proposal_service,
             pool,
         }
@@ -221,6 +243,73 @@ impl AuroraMcpServer {
         validate_mcp_text(&request.purpose, "purpose")?;
         self.gateway
             .search_personal_context(&request.query, &request.purpose, request.max_items)
+            .map(Json)
+            .map_err(internal_mcp_error)
+    }
+
+    #[tool(
+        description = "Search all authorized Aurora information through one bounded, read-only interface. Results always include a server-generated source URI. Searches personal context files and stored Telegram messages by default; never searches privacy rules, profile proposals, hashes, or internal database fields.",
+        annotations(
+            title = "Search Aurora",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn search_aurora(
+        &self,
+        Parameters(request): Parameters<GlobalSearchRequest>,
+    ) -> Result<Json<ContextPack>, McpError> {
+        validate_mcp_text(&request.query, "query")?;
+        validate_mcp_text(&request.purpose, "purpose")?;
+        validate_optional_mcp_bounded_text(request.channel_name.as_deref(), "channel_name", 500)?;
+        let (include_personal_context, include_telegram) =
+            parse_search_source_types(request.source_types.as_deref())?;
+        let starts_at = parse_optional_rfc3339(request.from.as_deref(), "from")?;
+        let ends_at = parse_optional_rfc3339(request.to.as_deref(), "to")?;
+        if let (Some(starts_at), Some(ends_at)) = (starts_at, ends_at)
+            && starts_at >= ends_at
+        {
+            return Err(McpError::invalid_params(
+                "from must be earlier than to",
+                None,
+            ));
+        }
+        if !include_telegram
+            && (request.channel_name.is_some() || starts_at.is_some() || ends_at.is_some())
+        {
+            return Err(McpError::invalid_params(
+                "channel_name, from, and to require telegram in source_types",
+                None,
+            ));
+        }
+        let max_results = request.max_results.unwrap_or(10);
+        if max_results == 0 {
+            return Err(McpError::invalid_params(
+                "max_results must be at least 1",
+                None,
+            ));
+        }
+        let mut connection = self.pool.acquire().await.map_err(|error| {
+            internal_mcp_error(format!("failed to acquire PostgreSQL connection: {error}"))
+        })?;
+
+        self.search_service
+            .search(
+                &mut connection,
+                SearchAurora {
+                    query: &request.query,
+                    purpose: &request.purpose,
+                    include_personal_context,
+                    include_telegram,
+                    channel_name: request.channel_name.as_deref(),
+                    starts_at,
+                    ends_at,
+                    max_results: max_results.min(25),
+                },
+            )
+            .await
             .map(Json)
             .map_err(internal_mcp_error)
     }
@@ -510,10 +599,11 @@ impl ServerHandler for AuroraMcpServer {}
 
 pub async fn serve(
     gateway: ContextGateway,
+    search_service: AuroraSearchService,
     proposal_service: ProfileUpdateProposalService,
     pool: PgPool,
 ) -> Result<(), String> {
-    let service = AuroraMcpServer::new(gateway, proposal_service, pool)
+    let service = AuroraMcpServer::new(gateway, search_service, proposal_service, pool)
         .serve(stdio())
         .await
         .map_err(|error| format!("failed to serve Aurora MCP: {error}"))?;
@@ -560,6 +650,52 @@ fn validate_optional_mcp_bounded_text(
         Some(value) => validate_mcp_bounded_text(value, field, max_chars),
         None => Ok(()),
     }
+}
+
+fn parse_optional_rfc3339(
+    value: Option<&str>,
+    field: &str,
+) -> Result<Option<DateTime<Utc>>, McpError> {
+    value
+        .map(|value| {
+            DateTime::parse_from_rfc3339(value)
+                .map(|value| value.with_timezone(&Utc))
+                .map_err(|error| {
+                    McpError::invalid_params(
+                        format!("{field} must be an RFC 3339 timestamp: {error}"),
+                        None,
+                    )
+                })
+        })
+        .transpose()
+}
+
+fn parse_search_source_types(source_types: Option<&[String]>) -> Result<(bool, bool), McpError> {
+    let Some(source_types) = source_types else {
+        return Ok((true, true));
+    };
+    if source_types.is_empty() {
+        return Err(McpError::invalid_params(
+            "source_types must contain personal_context and/or telegram",
+            None,
+        ));
+    }
+
+    let mut include_personal_context = false;
+    let mut include_telegram = false;
+    for source_type in source_types {
+        match source_type.as_str() {
+            "personal_context" => include_personal_context = true,
+            "telegram" => include_telegram = true,
+            _ => {
+                return Err(McpError::invalid_params(
+                    format!("unsupported source_type: {source_type}"),
+                    None,
+                ));
+            }
+        }
+    }
+    Ok((include_personal_context, include_telegram))
 }
 
 fn internal_mcp_error(error: String) -> McpError {
@@ -667,6 +803,40 @@ mod tests {
             .as_ref()
             .expect("Telegram save tool should declare annotations");
         assert_eq!(annotations.read_only_hint, Some(false));
+        assert_eq!(annotations.destructive_hint, Some(false));
+        assert_eq!(annotations.idempotent_hint, Some(true));
+        assert_eq!(annotations.open_world_hint, Some(false));
+    }
+
+    #[test]
+    fn global_search_tool_is_read_only_and_source_filterable() {
+        let tools = AuroraMcpServer::tool_router().list_all();
+        let tool = tools
+            .iter()
+            .find(|tool| tool.name == "search_aurora")
+            .expect("global search tool should be registered");
+        let schema = serde_json::to_string(&tool.input_schema)
+            .expect("global search input schema should serialize");
+
+        for field in [
+            "query",
+            "purpose",
+            "source_types",
+            "channel_name",
+            "from",
+            "to",
+            "max_results",
+        ] {
+            assert!(schema.contains(field));
+        }
+        assert!(!schema.contains("sql"));
+        assert!(!schema.contains("privacy_rules"));
+
+        let annotations = tool
+            .annotations
+            .as_ref()
+            .expect("global search tool should declare annotations");
+        assert_eq!(annotations.read_only_hint, Some(true));
         assert_eq!(annotations.destructive_hint, Some(false));
         assert_eq!(annotations.idempotent_hint, Some(true));
         assert_eq!(annotations.open_world_hint, Some(false));

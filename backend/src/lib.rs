@@ -4,9 +4,11 @@ pub mod config;
 pub mod domain;
 pub mod infrastructure;
 
+use application::aurora_search_service::AuroraSearchService;
 use application::context_gateway::ContextGateway;
 use application::profile_update_proposal_service::ProfileUpdateProposalService;
 use config::AppConfig;
+use infrastructure::audit_log::AuditLog;
 use infrastructure::database;
 
 pub fn run_args(args: impl IntoIterator<Item = String>) -> Result<(), String> {
@@ -22,7 +24,12 @@ fn run_mcp(config: AppConfig) -> Result<(), String> {
     runtime.block_on(async move {
         let pool = database::connect_and_migrate().await?;
         let gateway = ContextGateway::new(config.clone(), client.clone());
+        let search_service = AuroraSearchService::new(
+            gateway.clone(),
+            AuditLog::new(config.aurora_home.join("audit/mcp.jsonl")),
+            client.clone(),
+        );
         let proposal_service = ProfileUpdateProposalService::new(config, client);
-        api::mcp::serve(gateway, proposal_service, pool).await
+        api::mcp::serve(gateway, search_service, proposal_service, pool).await
     })
 }

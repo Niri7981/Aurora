@@ -1,6 +1,6 @@
 use crate::domain::telegram_message::TelegramMessage;
 use chrono::{DateTime, Utc};
-use sqlx::PgConnection;
+use sqlx::{PgConnection, Postgres, QueryBuilder};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,7 +22,72 @@ pub enum SaveTelegramMessageOutcome {
 
 pub struct TelegramMessageRepository;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchTelegramMessages<'a> {
+    pub terms: &'a [String],
+    pub channel_name: Option<&'a str>,
+    pub starts_at: Option<DateTime<Utc>>,
+    pub ends_at: Option<DateTime<Utc>>,
+    pub limit: u32,
+}
+
 impl TelegramMessageRepository {
+    pub async fn search(
+        connection: &mut PgConnection,
+        search: SearchTelegramMessages<'_>,
+    ) -> Result<Vec<TelegramMessage>, sqlx::Error> {
+        if search.terms.is_empty() || search.limit == 0 {
+            return Ok(Vec::new());
+        }
+
+        let mut query = QueryBuilder::<Postgres>::new(
+            r#"
+            SELECT
+                id,
+                channel_name,
+                content_text,
+                author_name,
+                published_at,
+                external_message_id,
+                external_url,
+                dedup_sha256,
+                saved_at
+            FROM telegram_messages
+            WHERE (
+            "#,
+        );
+        for (index, term) in search.terms.iter().enumerate() {
+            if index > 0 {
+                query.push(" OR ");
+            }
+            query
+                .push("LOWER(content_text) LIKE ")
+                .push_bind(format!("%{}%", term.to_lowercase()));
+        }
+        query.push(")");
+
+        if let Some(channel_name) = search.channel_name {
+            query
+                .push(" AND channel_name = ")
+                .push_bind(channel_name.to_string());
+        }
+        if let Some(starts_at) = search.starts_at {
+            query.push(" AND published_at >= ").push_bind(starts_at);
+        }
+        if let Some(ends_at) = search.ends_at {
+            query.push(" AND published_at < ").push_bind(ends_at);
+        }
+        query
+            .push(" ORDER BY published_at DESC NULLS LAST, saved_at DESC, id DESC LIMIT ")
+            .push_bind(i64::from(search.limit));
+
+        query
+            .build_query_as::<TelegramMessageRow>()
+            .fetch_all(connection)
+            .await
+            .map(|rows| rows.into_iter().map(TelegramMessage::from).collect())
+    }
+
     pub async fn save(
         connection: &mut PgConnection,
         new_message: NewTelegramMessage<'_>,
