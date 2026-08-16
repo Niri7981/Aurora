@@ -263,7 +263,8 @@ impl AuroraMcpServer {
     ) -> Result<Json<ContextPack>, McpError> {
         validate_mcp_text(&request.query, "query")?;
         validate_mcp_text(&request.purpose, "purpose")?;
-        validate_optional_mcp_bounded_text(request.channel_name.as_deref(), "channel_name", 500)?;
+        let channel_name = normalize_optional_search_filter(request.channel_name.as_deref());
+        validate_optional_mcp_bounded_text(channel_name, "channel_name", 500)?;
         let (include_personal_context, include_telegram) =
             parse_search_source_types(request.source_types.as_deref())?;
         let starts_at = parse_optional_rfc3339(request.from.as_deref(), "from")?;
@@ -276,8 +277,7 @@ impl AuroraMcpServer {
                 None,
             ));
         }
-        if !include_telegram
-            && (request.channel_name.is_some() || starts_at.is_some() || ends_at.is_some())
+        if !include_telegram && (channel_name.is_some() || starts_at.is_some() || ends_at.is_some())
         {
             return Err(McpError::invalid_params(
                 "channel_name, from, and to require telegram in source_types",
@@ -303,7 +303,7 @@ impl AuroraMcpServer {
                     purpose: &request.purpose,
                     include_personal_context,
                     include_telegram,
-                    channel_name: request.channel_name.as_deref(),
+                    channel_name,
                     starts_at,
                     ends_at,
                     max_results: max_results.min(25),
@@ -656,7 +656,7 @@ fn parse_optional_rfc3339(
     value: Option<&str>,
     field: &str,
 ) -> Result<Option<DateTime<Utc>>, McpError> {
-    value
+    normalize_optional_search_filter(value)
         .map(|value| {
             DateTime::parse_from_rfc3339(value)
                 .map(|value| value.with_timezone(&Utc))
@@ -668,6 +668,10 @@ fn parse_optional_rfc3339(
                 })
         })
         .transpose()
+}
+
+fn normalize_optional_search_filter(value: Option<&str>) -> Option<&str> {
+    value.filter(|value| !value.trim().is_empty())
 }
 
 fn parse_search_source_types(source_types: Option<&[String]>) -> Result<(bool, bool), McpError> {
@@ -745,7 +749,21 @@ impl ApplyProfileUpdateResponse {
 
 #[cfg(test)]
 mod tests {
-    use super::AuroraMcpServer;
+    use super::{AuroraMcpServer, normalize_optional_search_filter, parse_optional_rfc3339};
+
+    #[test]
+    fn blank_global_search_filters_are_treated_as_missing() {
+        assert_eq!(normalize_optional_search_filter(None), None);
+        assert_eq!(normalize_optional_search_filter(Some("")), None);
+        assert_eq!(normalize_optional_search_filter(Some("   ")), None);
+        assert_eq!(
+            normalize_optional_search_filter(Some("abetterpath 招聘求职")),
+            Some("abetterpath 招聘求职")
+        );
+
+        assert_eq!(parse_optional_rfc3339(Some(""), "from").unwrap(), None);
+        assert_eq!(parse_optional_rfc3339(Some("   "), "to").unwrap(), None);
+    }
 
     #[test]
     fn proposal_tool_does_not_accept_status_hash_or_agent_identity() {
