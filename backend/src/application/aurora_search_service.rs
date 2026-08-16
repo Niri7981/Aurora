@@ -150,6 +150,18 @@ fn telegram_context_item(message: TelegramMessage) -> ContextItem {
     if let Some(external_url) = &message.external_url {
         metadata.push(format!("External URL: {external_url}"));
     }
+    let content_urls = message
+        .content_urls
+        .iter()
+        .filter(|content_url| Some(content_url.url.as_str()) != message.external_url.as_deref())
+        .collect::<Vec<_>>();
+    for content_url in content_urls.iter().take(10) {
+        let kind = content_url.kind.as_deref().unwrap_or("unspecified");
+        metadata.push(format!("Content URL ({kind}): {}", content_url.url));
+    }
+    if content_urls.len() > 10 {
+        metadata.push(format!("Content URLs omitted: {}", content_urls.len() - 10));
+    }
     let (content, truncated) = truncate_chars(&message.content_text, MAX_TELEGRAM_CONTENT_CHARS);
     metadata.push(String::new());
     metadata.push(content);

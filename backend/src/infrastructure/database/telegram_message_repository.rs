@@ -1,6 +1,6 @@
-use crate::domain::telegram_message::TelegramMessage;
+use crate::domain::telegram_message::{ContentUrl, TelegramMessage};
 use chrono::{DateTime, Utc};
-use sqlx::{PgConnection, Postgres, QueryBuilder};
+use sqlx::{PgConnection, Postgres, QueryBuilder, types::Json};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -11,6 +11,7 @@ pub struct NewTelegramMessage<'a> {
     pub published_at: Option<DateTime<Utc>>,
     pub external_message_id: Option<&'a str>,
     pub external_url: Option<&'a str>,
+    pub content_urls: &'a [ContentUrl],
     pub dedup_sha256: &'a str,
 }
 
@@ -50,6 +51,7 @@ impl TelegramMessageRepository {
                 published_at,
                 external_message_id,
                 external_url,
+                content_urls,
                 dedup_sha256,
                 saved_at
             FROM telegram_messages
@@ -60,9 +62,13 @@ impl TelegramMessageRepository {
             if index > 0 {
                 query.push(" OR ");
             }
+            let pattern = format!("%{}%", term.to_lowercase());
             query
-                .push("LOWER(content_text) LIKE ")
-                .push_bind(format!("%{}%", term.to_lowercase()));
+                .push("(LOWER(content_text) LIKE ")
+                .push_bind(pattern.clone())
+                .push(" OR LOWER(content_urls::text) LIKE ")
+                .push_bind(pattern)
+                .push(")");
         }
         query.push(")");
 
@@ -101,9 +107,10 @@ impl TelegramMessageRepository {
                 published_at,
                 external_message_id,
                 external_url,
+                content_urls,
                 dedup_sha256
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             ON CONFLICT (dedup_sha256) DO NOTHING
             RETURNING
                 id,
@@ -113,6 +120,7 @@ impl TelegramMessageRepository {
                 published_at,
                 external_message_id,
                 external_url,
+                content_urls,
                 dedup_sha256,
                 saved_at
             "#,
@@ -123,6 +131,7 @@ impl TelegramMessageRepository {
         .bind(new_message.published_at)
         .bind(new_message.external_message_id)
         .bind(new_message.external_url)
+        .bind(Json(new_message.content_urls))
         .bind(new_message.dedup_sha256)
         .fetch_optional(&mut *connection)
         .await?;
@@ -151,6 +160,7 @@ impl TelegramMessageRepository {
                 published_at,
                 external_message_id,
                 external_url,
+                content_urls,
                 dedup_sha256,
                 saved_at
             FROM telegram_messages
@@ -173,6 +183,7 @@ struct TelegramMessageRow {
     published_at: Option<DateTime<Utc>>,
     external_message_id: Option<String>,
     external_url: Option<String>,
+    content_urls: Json<Vec<ContentUrl>>,
     dedup_sha256: String,
     saved_at: DateTime<Utc>,
 }
@@ -187,6 +198,7 @@ impl From<TelegramMessageRow> for TelegramMessage {
             published_at: row.published_at,
             external_message_id: row.external_message_id,
             external_url: row.external_url,
+            content_urls: row.content_urls.0,
             dedup_sha256: row.dedup_sha256,
             saved_at: row.saved_at,
         }

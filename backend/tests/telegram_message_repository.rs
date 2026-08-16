@@ -1,4 +1,5 @@
 use aurora::application::telegram_message_service::{SaveTelegramMessage, TelegramMessageService};
+use aurora::domain::telegram_message::ContentUrl;
 use aurora::infrastructure::database::telegram_message_repository::SaveTelegramMessageOutcome;
 use aurora::infrastructure::database::telegram_message_repository::{
     SearchTelegramMessages, TelegramMessageRepository,
@@ -27,6 +28,10 @@ async fn saves_one_telegram_message_without_duplicating_its_source() {
         .expect("migrations should run");
 
     let mut transaction = pool.begin().await.expect("transaction should begin");
+    let content_urls = [ContentUrl {
+        url: "https://example.com/jobs/rust".to_string(),
+        kind: Some("job_application".to_string()),
+    }];
     let fixture = SaveTelegramMessage {
         channel_name: "Example jobs",
         content_text: "A fictional company is hiring a Rust engineer.",
@@ -34,6 +39,7 @@ async fn saves_one_telegram_message_without_duplicating_its_source() {
         published_at: Some(timestamp("2026-08-07T23:27:00+08:00")),
         external_message_id: Some("42"),
         external_url: Some("https://t.me/example_jobs/42"),
+        content_urls: &content_urls,
     };
     let created = TelegramMessageService::save(&mut transaction, fixture)
         .await
@@ -58,6 +64,13 @@ async fn saves_one_telegram_message_without_duplicating_its_source() {
     };
     assert_eq!(duplicate.id, created.id);
     assert_eq!(duplicate.content_text, created.content_text);
+    assert_eq!(created.content_urls.len(), 2);
+    assert!(
+        created
+            .content_urls
+            .iter()
+            .any(|content_url| content_url.url == "https://example.com/jobs/rust")
+    );
 
     let count: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM telegram_messages WHERE external_url = $1")
@@ -82,6 +95,22 @@ async fn saves_one_telegram_message_without_duplicating_its_source() {
     .expect("saved message should be searchable");
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].id, created.id);
+
+    let url_terms = vec!["example.com/jobs/rust".to_string()];
+    let found_by_url = TelegramMessageRepository::search(
+        &mut transaction,
+        SearchTelegramMessages {
+            terms: &url_terms,
+            channel_name: None,
+            starts_at: None,
+            ends_at: None,
+            limit: 10,
+        },
+    )
+    .await
+    .expect("message URL should be searchable");
+    assert_eq!(found_by_url.len(), 1);
+    assert_eq!(found_by_url[0].id, created.id);
 
     let missing_terms = vec!["python".to_string()];
     let missing = TelegramMessageRepository::search(

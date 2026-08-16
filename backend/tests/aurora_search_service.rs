@@ -75,6 +75,7 @@ async fn globally_searches_personal_context_and_telegram_with_server_sources() {
             published_at: None,
             external_message_id: Some("global-search-1"),
             external_url: Some("https://t.me/example_jobs/global-search-1"),
+            content_urls: &[],
         },
     )
     .await

@@ -12,6 +12,7 @@ use crate::application::profile_update_proposal_service::{
 use crate::application::telegram_message_service::{SaveTelegramMessage, TelegramMessageService};
 use crate::domain::context_pack::ContextPack;
 use crate::domain::profile_update_proposal::{ProfileUpdateProposal, ProfileUpdateTarget};
+use crate::domain::telegram_message::ContentUrl;
 use crate::infrastructure::database::telegram_message_repository::SaveTelegramMessageOutcome;
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
@@ -93,6 +94,9 @@ struct SaveTelegramMessageRequest {
     external_message_id: Option<String>,
     /// Original source URL shown in the forwarded message, when available.
     external_url: Option<String>,
+    /// All URLs contained in the message. Each item may describe its role, such as source_post,
+    /// job_application, company_website, or other.
+    content_urls: Option<Vec<ContentUrl>>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -363,6 +367,7 @@ impl AuroraMcpServer {
                 published_at,
                 external_message_id: request.external_message_id.as_deref(),
                 external_url: request.external_url.as_deref(),
+                content_urls: request.content_urls.as_deref().unwrap_or_default(),
             },
         )
         .await
@@ -809,6 +814,7 @@ mod tests {
             "published_at",
             "external_message_id",
             "external_url",
+            "content_urls",
         ] {
             assert!(schema.contains(field));
         }
