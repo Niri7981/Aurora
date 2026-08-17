@@ -88,6 +88,7 @@ async fn saves_one_telegram_message_without_duplicating_its_source() {
             channel_name: Some("Example jobs"),
             starts_at: Some(timestamp("2026-08-01T00:00:00Z")),
             ends_at: Some(timestamp("2026-09-01T00:00:00Z")),
+            offset: 0,
             limit: 10,
         },
     )
@@ -95,6 +96,35 @@ async fn saves_one_telegram_message_without_duplicating_its_source() {
     .expect("saved message should be searchable");
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].id, created.id);
+    let count = TelegramMessageRepository::count(
+        &mut transaction,
+        &SearchTelegramMessages {
+            terms: &terms,
+            channel_name: Some("Example jobs"),
+            starts_at: Some(timestamp("2026-08-01T00:00:00Z")),
+            ends_at: Some(timestamp("2026-09-01T00:00:00Z")),
+            offset: 0,
+            limit: 10,
+        },
+    )
+    .await
+    .expect("exact match count should be readable");
+    assert_eq!(count, 1);
+
+    let after_last_result = TelegramMessageRepository::search(
+        &mut transaction,
+        SearchTelegramMessages {
+            terms: &terms,
+            channel_name: Some("Example jobs"),
+            starts_at: None,
+            ends_at: None,
+            offset: 1,
+            limit: 10,
+        },
+    )
+    .await
+    .expect("an exhausted page should succeed");
+    assert!(after_last_result.is_empty());
 
     let url_terms = vec!["example.com/jobs/rust".to_string()];
     let found_by_url = TelegramMessageRepository::search(
@@ -104,6 +134,7 @@ async fn saves_one_telegram_message_without_duplicating_its_source() {
             channel_name: None,
             starts_at: None,
             ends_at: None,
+            offset: 0,
             limit: 10,
         },
     )
@@ -120,6 +151,7 @@ async fn saves_one_telegram_message_without_duplicating_its_source() {
             channel_name: Some("Example jobs"),
             starts_at: None,
             ends_at: None,
+            offset: 0,
             limit: 10,
         },
     )

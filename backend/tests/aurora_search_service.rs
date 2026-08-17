@@ -80,6 +80,20 @@ async fn globally_searches_personal_context_and_telegram_with_server_sources() {
     )
     .await
     .expect("Telegram fixture should be saved");
+    TelegramMessageService::save(
+        &mut transaction,
+        SaveTelegramMessage {
+            channel_name: "Example jobs",
+            content_text: "Another fictional Aurora Rust role for pagination.",
+            author_name: Some("Example recruiter"),
+            published_at: None,
+            external_message_id: Some("global-search-2"),
+            external_url: Some("https://jobs.example.com/global-search-2"),
+            content_urls: &[],
+        },
+    )
+    .await
+    .expect("second Telegram fixture should be saved");
 
     let gateway = ContextGateway::new(config.clone(), "hermes-test");
     let audit_log = AuditLog::new(config.aurora_home.join("audit/mcp.jsonl"));
@@ -95,23 +109,89 @@ async fn globally_searches_personal_context_and_telegram_with_server_sources() {
                 channel_name: None,
                 starts_at: None,
                 ends_at: None,
-                max_results: 10,
+                offset: 0,
+                page_size: 2,
+                count_only: false,
             },
         )
         .await
         .expect("global search should succeed");
 
+    assert_eq!(pack.counts.total_matches, 3);
+    assert_eq!(pack.counts.personal_context, 1);
+    assert_eq!(pack.counts.telegram, 2);
+    assert_eq!(pack.page.returned_count, 2);
+    assert!(pack.page.has_more);
+    assert_eq!(pack.page.next_cursor.as_deref(), Some("v1:2"));
     assert!(
         pack.items
             .iter()
-            .any(|item| item.source == "aurora://identity-card.md")
+            .any(|item| item.stored_record_uri == "aurora://identity-card.md")
+    );
+    let telegram = pack
+        .items
+        .iter()
+        .find(|item| {
+            item.stored_record_uri
+                .starts_with("aurora://telegram/messages/")
+        })
+        .expect("Telegram result should be present");
+    assert_eq!(telegram.collection_source.platform, "telegram");
+    assert_eq!(telegram.collection_source.container_name, "Example jobs");
+    assert!(
+        ["t.me", "jobs.example.com"]
+            .contains(&telegram.original_source.as_ref().unwrap().platform.as_str())
     );
     assert!(
         pack.items
             .iter()
-            .any(|item| item.source.starts_with("aurora://telegram/messages/"))
+            .all(|item| !item.stored_record_uri.is_empty())
     );
-    assert!(pack.items.iter().all(|item| !item.source.is_empty()));
+
+    let second_page = service
+        .search(
+            &mut transaction,
+            SearchAurora {
+                query: "Aurora Rust",
+                purpose: "continue the authorized search",
+                include_personal_context: true,
+                include_telegram: true,
+                channel_name: None,
+                starts_at: None,
+                ends_at: None,
+                offset: 2,
+                page_size: 2,
+                count_only: false,
+            },
+        )
+        .await
+        .expect("second search page should succeed");
+    assert_eq!(second_page.counts.total_matches, 3);
+    assert_eq!(second_page.page.returned_count, 1);
+    assert!(!second_page.page.has_more);
+    assert!(second_page.page.next_cursor.is_none());
+
+    let count_only = service
+        .search(
+            &mut transaction,
+            SearchAurora {
+                query: "Aurora Rust",
+                purpose: "count authorized matches",
+                include_personal_context: true,
+                include_telegram: true,
+                channel_name: None,
+                starts_at: None,
+                ends_at: None,
+                offset: 0,
+                page_size: 10,
+                count_only: true,
+            },
+        )
+        .await
+        .expect("count-only search should succeed");
+    assert_eq!(count_only.counts.total_matches, 3);
+    assert_eq!(count_only.page.returned_count, 0);
+    assert!(count_only.items.is_empty());
     assert!(
         !serde_json::to_string(&pack)
             .unwrap()

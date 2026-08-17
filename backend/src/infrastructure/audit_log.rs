@@ -47,6 +47,25 @@ impl AuditLog {
         self.append(AuditEvent::failure(client, tool, purpose, query, error))
     }
 
+    pub fn append_search_success<'a>(
+        &self,
+        client: &'a str,
+        tool: &'a str,
+        purpose: &'a str,
+        query: &'a str,
+        returned_sources: &[&'a str],
+        omitted_lines: usize,
+    ) -> Result<(), String> {
+        self.append(AuditEvent::search_success(
+            client,
+            tool,
+            purpose,
+            query,
+            returned_sources,
+            omitted_lines,
+        ))
+    }
+
     pub fn render_recent(&self, limit: usize) -> Result<String, String> {
         if !self.path.exists() {
             return Ok("暂无 MCP 上下文调用记录。".to_string());
@@ -115,6 +134,27 @@ impl<'a> AuditEvent<'a> {
                 .iter()
                 .map(|omission| omission.line_count)
                 .sum(),
+            error: None,
+        }
+    }
+
+    fn search_success(
+        client: &'a str,
+        tool: &'a str,
+        purpose: &'a str,
+        query: &'a str,
+        returned_sources: &[&'a str],
+        omitted_lines: usize,
+    ) -> Self {
+        Self {
+            timestamp_unix_ms: timestamp_unix_ms(),
+            client,
+            tool,
+            purpose,
+            query: Some(query),
+            status: "succeeded",
+            returned_sources: returned_sources.to_vec(),
+            omitted_lines,
             error: None,
         }
     }

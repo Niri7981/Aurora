@@ -29,10 +29,34 @@ pub struct SearchTelegramMessages<'a> {
     pub channel_name: Option<&'a str>,
     pub starts_at: Option<DateTime<Utc>>,
     pub ends_at: Option<DateTime<Utc>>,
+    pub offset: u64,
     pub limit: u32,
 }
 
 impl TelegramMessageRepository {
+    pub async fn count(
+        connection: &mut PgConnection,
+        search: &SearchTelegramMessages<'_>,
+    ) -> Result<u64, sqlx::Error> {
+        if search.terms.is_empty() {
+            return Ok(0);
+        }
+
+        let mut query = QueryBuilder::<Postgres>::new(
+            r#"
+            SELECT COUNT(*)
+            FROM telegram_messages
+            WHERE (
+            "#,
+        );
+        push_term_predicates(&mut query, search.terms);
+        query.push(")");
+        push_filters(&mut query, search);
+
+        let count: i64 = query.build_query_scalar().fetch_one(connection).await?;
+        Ok(count.max(0) as u64)
+    }
+
     pub async fn search(
         connection: &mut PgConnection,
         search: SearchTelegramMessages<'_>,
@@ -58,33 +82,13 @@ impl TelegramMessageRepository {
             WHERE (
             "#,
         );
-        for (index, term) in search.terms.iter().enumerate() {
-            if index > 0 {
-                query.push(" OR ");
-            }
-            let pattern = format!("%{}%", term.to_lowercase());
-            query
-                .push("(LOWER(content_text) LIKE ")
-                .push_bind(pattern.clone())
-                .push(" OR LOWER(content_urls::text) LIKE ")
-                .push_bind(pattern)
-                .push(")");
-        }
+        push_term_predicates(&mut query, search.terms);
         query.push(")");
-
-        if let Some(channel_name) = search.channel_name {
-            query
-                .push(" AND channel_name = ")
-                .push_bind(channel_name.to_string());
-        }
-        if let Some(starts_at) = search.starts_at {
-            query.push(" AND published_at >= ").push_bind(starts_at);
-        }
-        if let Some(ends_at) = search.ends_at {
-            query.push(" AND published_at < ").push_bind(ends_at);
-        }
+        push_filters(&mut query, &search);
         query
-            .push(" ORDER BY published_at DESC NULLS LAST, saved_at DESC, id DESC LIMIT ")
+            .push(" ORDER BY published_at DESC NULLS LAST, saved_at DESC, id DESC OFFSET ")
+            .push_bind(search.offset.min(i64::MAX as u64) as i64)
+            .push(" LIMIT ")
             .push_bind(i64::from(search.limit));
 
         query
@@ -171,6 +175,35 @@ impl TelegramMessageRepository {
         .fetch_optional(connection)
         .await
         .map(|row| row.map(TelegramMessage::from))
+    }
+}
+
+fn push_term_predicates<'a>(query: &mut QueryBuilder<'a, Postgres>, terms: &'a [String]) {
+    for (index, term) in terms.iter().enumerate() {
+        if index > 0 {
+            query.push(" OR ");
+        }
+        let pattern = format!("%{}%", term.to_lowercase());
+        query
+            .push("(LOWER(content_text) LIKE ")
+            .push_bind(pattern.clone())
+            .push(" OR LOWER(content_urls::text) LIKE ")
+            .push_bind(pattern)
+            .push(")");
+    }
+}
+
+fn push_filters<'a>(query: &mut QueryBuilder<'a, Postgres>, search: &SearchTelegramMessages<'a>) {
+    if let Some(channel_name) = search.channel_name {
+        query
+            .push(" AND channel_name = ")
+            .push_bind(channel_name.to_string());
+    }
+    if let Some(starts_at) = search.starts_at {
+        query.push(" AND published_at >= ").push_bind(starts_at);
+    }
+    if let Some(ends_at) = search.ends_at {
+        query.push(" AND published_at < ").push_bind(ends_at);
     }
 }
 

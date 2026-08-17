@@ -4,7 +4,9 @@ use rmcp::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::application::aurora_search_service::{AuroraSearchService, SearchAurora};
+use crate::application::aurora_search_service::{
+    AuroraSearchResponse, AuroraSearchService, SearchAurora, decode_cursor,
+};
 use crate::application::context_gateway::ContextGateway;
 use crate::application::profile_update_proposal_service::{
     ApplyProfileUpdateOutcome, DeleteProfileUpdateOutcome, ProfileUpdateProposalService,
@@ -48,8 +50,12 @@ struct GlobalSearchRequest {
     from: Option<String>,
     /// Optional exclusive upper publication-time bound as RFC 3339.
     to: Option<String>,
-    /// Maximum combined results. Defaults to 10 and is capped at 25.
-    max_results: Option<u32>,
+    /// Number of results in one page. Defaults to 10 and is capped at 25.
+    page_size: Option<u32>,
+    /// Opaque cursor returned in page.next_cursor. Omit for the first page.
+    cursor: Option<String>,
+    /// Return exact match counts without result bodies. Use for "how many" questions.
+    count_only: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -252,7 +258,7 @@ impl AuroraMcpServer {
     }
 
     #[tool(
-        description = "Search all authorized Aurora information through one bounded, read-only interface. Results always include a server-generated source URI. Searches personal context files and stored Telegram messages by default; never searches privacy rules, profile proposals, hashes, or internal database fields.",
+        description = "Search authorized Aurora information with exact match counts, cursor pagination, and structured provenance. Use count_only=true for total-count questions. A page's returned_count is never the total; read counts.total_matches. Each result separates its Aurora record URI, collection source (such as a Telegram channel), and linked original source. Never searches privacy rules, profile proposals, hashes, or internal database fields.",
         annotations(
             title = "Search Aurora",
             read_only_hint = true,
@@ -264,7 +270,7 @@ impl AuroraMcpServer {
     async fn search_aurora(
         &self,
         Parameters(request): Parameters<GlobalSearchRequest>,
-    ) -> Result<Json<ContextPack>, McpError> {
+    ) -> Result<Json<AuroraSearchResponse>, McpError> {
         validate_mcp_text(&request.query, "query")?;
         validate_mcp_text(&request.purpose, "purpose")?;
         let channel_name = normalize_optional_search_filter(request.channel_name.as_deref());
@@ -288,10 +294,24 @@ impl AuroraMcpServer {
                 None,
             ));
         }
-        let max_results = request.max_results.unwrap_or(10);
-        if max_results == 0 {
+        let page_size = request.page_size.unwrap_or(10);
+        if page_size == 0 {
             return Err(McpError::invalid_params(
-                "max_results must be at least 1",
+                "page_size must be at least 1",
+                None,
+            ));
+        }
+        let cursor = normalize_optional_search_filter(request.cursor.as_deref());
+        validate_optional_mcp_bounded_text(cursor, "cursor", 100)?;
+        let offset = cursor
+            .map(decode_cursor)
+            .transpose()
+            .map_err(|error| McpError::invalid_params(error, None))?
+            .unwrap_or(0);
+        let count_only = request.count_only.unwrap_or(false);
+        if count_only && cursor.is_some() {
+            return Err(McpError::invalid_params(
+                "cursor must be omitted when count_only is true",
                 None,
             ));
         }
@@ -310,7 +330,9 @@ impl AuroraMcpServer {
                     channel_name,
                     starts_at,
                     ends_at,
-                    max_results: max_results.min(25),
+                    offset,
+                    page_size: page_size.min(25),
+                    count_only,
                 },
             )
             .await
@@ -598,7 +620,7 @@ impl AuroraMcpServer {
 #[tool_handler(
     name = "aurora",
     version = "0.1.0",
-    instructions = "Aurora is the user's local identity and context authority. Read only the minimum context needed. Save a Telegram message only after the user explicitly asks to store that single forwarded message; Telegram source material is kept separate from profile documents. Agents may create, review, apply, and delete pending profile update proposals. Applying writes the proposal's exact content, checks the original file version, and cannot modify privacy rules. Applied and stale records cannot be deleted."
+    instructions = "Aurora is the user's local identity and context authority. Read only the minimum context needed. For search totals, call search_aurora with count_only=true and report counts.total_matches; never treat page.returned_count as the total. When page.has_more is true, pass page.next_cursor unchanged to continue the same search. Keep stored_record_uri, collection_source, and original_source distinct when citing results. Save a Telegram message only after the user explicitly asks to store that single forwarded message; Telegram source material is kept separate from profile documents. Agents may create, review, apply, and delete pending profile update proposals. Applying writes the proposal's exact content, checks the original file version, and cannot modify privacy rules. Applied and stale records cannot be deleted."
 )]
 impl ServerHandler for AuroraMcpServer {}
 
@@ -849,12 +871,15 @@ mod tests {
             "channel_name",
             "from",
             "to",
-            "max_results",
+            "page_size",
+            "cursor",
+            "count_only",
         ] {
             assert!(schema.contains(field));
         }
         assert!(!schema.contains("sql"));
         assert!(!schema.contains("privacy_rules"));
+        assert!(!schema.contains("max_results"));
 
         let annotations = tool
             .annotations

@@ -1,11 +1,13 @@
 use std::collections::HashSet;
 
 use chrono::{DateTime, Utc};
+use schemars::JsonSchema;
+use serde::Serialize;
 use sqlx::PgConnection;
 
 use crate::application::context_gateway::ContextGateway;
-use crate::domain::context_pack::{ContextItem, ContextPack};
-use crate::domain::telegram_message::TelegramMessage;
+use crate::domain::context_pack::{ContextItem, ContextOmission, ContextPack};
+use crate::domain::telegram_message::{ContentUrl, TelegramMessage};
 use crate::infrastructure::audit_log::AuditLog;
 use crate::infrastructure::database::telegram_message_repository::{
     SearchTelegramMessages, TelegramMessageRepository,
@@ -24,7 +26,65 @@ pub struct SearchAurora<'a> {
     pub channel_name: Option<&'a str>,
     pub starts_at: Option<DateTime<Utc>>,
     pub ends_at: Option<DateTime<Utc>>,
-    pub max_results: u32,
+    pub offset: u64,
+    pub page_size: u32,
+    pub count_only: bool,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct AuroraSearchResponse {
+    pub purpose: String,
+    pub query: String,
+    pub client: String,
+    pub access: String,
+    pub match_semantics: String,
+    pub counts: SearchCounts,
+    pub page: SearchPage,
+    pub items: Vec<AuroraSearchItem>,
+    pub omissions: Vec<ContextOmission>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct SearchCounts {
+    pub total_matches: u64,
+    pub personal_context: u64,
+    pub telegram: u64,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct SearchPage {
+    pub count_only: bool,
+    pub offset: u64,
+    pub page_size: u32,
+    pub returned_count: u32,
+    pub has_more: bool,
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct AuroraSearchItem {
+    pub record_type: String,
+    pub stored_record_uri: String,
+    pub title: String,
+    pub collection_source: CollectionSource,
+    pub original_source: Option<OriginalSource>,
+    pub attributed_author: Option<String>,
+    pub published_at: Option<String>,
+    pub content_urls: Vec<ContentUrl>,
+    pub content_excerpt: String,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct CollectionSource {
+    pub platform: String,
+    pub container_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct OriginalSource {
+    pub platform: String,
+    pub url: String,
 }
 
 #[derive(Clone)]
@@ -51,13 +111,29 @@ impl AuroraSearchService {
         &self,
         connection: &mut PgConnection,
         request: SearchAurora<'_>,
-    ) -> Result<ContextPack, String> {
+    ) -> Result<AuroraSearchResponse, String> {
         let result = self.search_inner(connection, request).await;
         match result {
-            Ok(pack) => {
-                self.audit_log
-                    .append_success(&self.client, "search_aurora", &pack)?;
-                Ok(pack)
+            Ok(response) => {
+                let returned_sources = response
+                    .items
+                    .iter()
+                    .map(|item| item.stored_record_uri.as_str())
+                    .collect::<Vec<_>>();
+                let omitted_lines = response
+                    .omissions
+                    .iter()
+                    .map(|omission| omission.line_count)
+                    .sum();
+                self.audit_log.append_search_success(
+                    &self.client,
+                    "search_aurora",
+                    &response.purpose,
+                    &response.query,
+                    &returned_sources,
+                    omitted_lines,
+                )?;
+                Ok(response)
             }
             Err(error) => {
                 self.audit_log.append_failure(
@@ -76,103 +152,174 @@ impl AuroraSearchService {
         &self,
         connection: &mut PgConnection,
         request: SearchAurora<'_>,
-    ) -> Result<ContextPack, String> {
-        let personal_limit = if request.include_personal_context && request.include_telegram {
-            (request.max_results / 3)
-                .max(1)
-                .min(MAX_PERSONAL_ITEMS as u32) as usize
-        } else {
-            (request.max_results as usize).min(MAX_PERSONAL_ITEMS)
-        };
+    ) -> Result<AuroraSearchResponse, String> {
         let mut personal_pack = if request.include_personal_context {
-            self.context_gateway.search_personal_context_unlogged(
-                request.query,
-                request.purpose,
-                Some(personal_limit),
-            )?
+            self.context_gateway
+                .search_personal_context_exact_unlogged(
+                    request.query,
+                    request.purpose,
+                    Some(MAX_PERSONAL_ITEMS),
+                )?
         } else {
-            empty_pack(request, &self.client)
+            ContextPack {
+                purpose: request.purpose.to_string(),
+                query: Some(request.query.to_string()),
+                client: self.client.clone(),
+                access: "read-only".to_string(),
+                items: Vec::new(),
+                omissions: Vec::new(),
+            }
         };
+        let personal_count = personal_pack.items.len() as u64;
+
+        let terms = query_terms(request.query);
+        let telegram_search = SearchTelegramMessages {
+            terms: &terms,
+            channel_name: request.channel_name,
+            starts_at: request.starts_at,
+            ends_at: request.ends_at,
+            offset: 0,
+            limit: request.page_size,
+        };
+        let telegram_count = if request.include_telegram {
+            TelegramMessageRepository::count(connection, &telegram_search)
+                .await
+                .map_err(|error| format!("failed to count Telegram messages: {error}"))?
+        } else {
+            0
+        };
+        let total_matches = personal_count.saturating_add(telegram_count);
 
         let mut items = Vec::new();
-        if request.include_telegram {
-            let terms = query_terms(request.query);
-            let telegram_limit = request
-                .max_results
-                .saturating_sub(personal_pack.items.len() as u32);
-            let messages = TelegramMessageRepository::search(
-                connection,
-                SearchTelegramMessages {
-                    terms: &terms,
-                    channel_name: request.channel_name,
-                    starts_at: request.starts_at,
-                    ends_at: request.ends_at,
-                    limit: telegram_limit,
-                },
-            )
-            .await
-            .map_err(|error| format!("failed to search Telegram messages: {error}"))?;
-            items.extend(messages.into_iter().map(telegram_context_item));
-        }
-        items.append(&mut personal_pack.items);
-        items.truncate(request.max_results as usize);
+        if !request.count_only && request.offset < total_matches {
+            let mut remaining = request.page_size as usize;
+            if request.offset < personal_count {
+                let personal_offset = request.offset as usize;
+                let personal_items = std::mem::take(&mut personal_pack.items);
+                items.extend(
+                    personal_items
+                        .into_iter()
+                        .skip(personal_offset)
+                        .take(remaining)
+                        .map(personal_search_item),
+                );
+                remaining = remaining.saturating_sub(items.len());
+            }
 
-        Ok(ContextPack {
+            let telegram_offset = request.offset.saturating_sub(personal_count);
+            if request.include_telegram && remaining > 0 && telegram_offset < telegram_count {
+                let messages = TelegramMessageRepository::search(
+                    connection,
+                    SearchTelegramMessages {
+                        offset: telegram_offset,
+                        limit: remaining as u32,
+                        ..telegram_search
+                    },
+                )
+                .await
+                .map_err(|error| format!("failed to search Telegram messages: {error}"))?;
+                items.extend(messages.into_iter().map(telegram_search_item));
+            }
+        }
+
+        let returned_count = items.len() as u32;
+        let next_offset = request.offset.saturating_add(u64::from(returned_count));
+        let has_more = !request.count_only && returned_count > 0 && next_offset < total_matches;
+
+        Ok(AuroraSearchResponse {
             purpose: request.purpose.to_string(),
-            query: Some(request.query.to_string()),
+            query: request.query.to_string(),
             client: self.client.clone(),
-            access: "read-only, source-attributed, minimum-necessary disclosure".to_string(),
+            access: "read-only, source-attributed, paginated disclosure".to_string(),
+            match_semantics: "case-insensitive substring; multiple query terms match any term"
+                .to_string(),
+            counts: SearchCounts {
+                total_matches,
+                personal_context: personal_count,
+                telegram: telegram_count,
+            },
+            page: SearchPage {
+                count_only: request.count_only,
+                offset: request.offset,
+                page_size: request.page_size,
+                returned_count,
+                has_more,
+                next_cursor: has_more.then(|| encode_cursor(next_offset)),
+            },
             items,
             omissions: personal_pack.omissions,
         })
     }
 }
 
-fn empty_pack(request: SearchAurora<'_>, client: &str) -> ContextPack {
-    ContextPack {
-        purpose: request.purpose.to_string(),
-        query: Some(request.query.to_string()),
-        client: client.to_string(),
-        access: "read-only".to_string(),
-        items: Vec::new(),
-        omissions: Vec::new(),
+fn personal_search_item(item: ContextItem) -> AuroraSearchItem {
+    AuroraSearchItem {
+        record_type: item.category,
+        stored_record_uri: item.source,
+        title: item.label.clone(),
+        collection_source: CollectionSource {
+            platform: "aurora".to_string(),
+            container_name: item.label,
+        },
+        original_source: None,
+        attributed_author: None,
+        published_at: None,
+        content_urls: Vec::new(),
+        content_excerpt: item.content,
+        truncated: item.truncated,
     }
 }
 
-fn telegram_context_item(message: TelegramMessage) -> ContextItem {
-    let mut metadata = vec![format!("Channel: {}", message.channel_name)];
-    if let Some(author_name) = &message.author_name {
-        metadata.push(format!("Author: {author_name}"));
-    }
-    if let Some(published_at) = message.published_at {
-        metadata.push(format!("Published: {}", published_at.to_rfc3339()));
-    }
-    if let Some(external_url) = &message.external_url {
-        metadata.push(format!("External URL: {external_url}"));
-    }
-    let content_urls = message
-        .content_urls
-        .iter()
-        .filter(|content_url| Some(content_url.url.as_str()) != message.external_url.as_deref())
-        .collect::<Vec<_>>();
-    for content_url in content_urls.iter().take(10) {
-        let kind = content_url.kind.as_deref().unwrap_or("unspecified");
-        metadata.push(format!("Content URL ({kind}): {}", content_url.url));
-    }
-    if content_urls.len() > 10 {
-        metadata.push(format!("Content URLs omitted: {}", content_urls.len() - 10));
-    }
-    let (content, truncated) = truncate_chars(&message.content_text, MAX_TELEGRAM_CONTENT_CHARS);
-    metadata.push(String::new());
-    metadata.push(content);
+fn telegram_search_item(message: TelegramMessage) -> AuroraSearchItem {
+    let (content_excerpt, truncated) =
+        truncate_chars(&message.content_text, MAX_TELEGRAM_CONTENT_CHARS);
+    let original_source = message.external_url.as_ref().map(|url| OriginalSource {
+        platform: platform_from_url(url),
+        url: url.clone(),
+    });
 
-    ContextItem {
-        category: "telegram_message".to_string(),
-        label: format!("Telegram · {}", message.channel_name),
-        source: format!("aurora://telegram/messages/{}", message.id),
-        content: metadata.join("\n"),
+    AuroraSearchItem {
+        record_type: "telegram_message".to_string(),
+        stored_record_uri: format!("aurora://telegram/messages/{}", message.id),
+        title: format!("Telegram message in {}", message.channel_name),
+        collection_source: CollectionSource {
+            platform: "telegram".to_string(),
+            container_name: message.channel_name,
+        },
+        original_source,
+        attributed_author: message.author_name,
+        published_at: message.published_at.map(|value| value.to_rfc3339()),
+        content_urls: message.content_urls,
+        content_excerpt,
         truncated,
     }
+}
+
+fn platform_from_url(url: &str) -> String {
+    url.split_once("://")
+        .map(|(_, remainder)| remainder)
+        .unwrap_or(url)
+        .split('/')
+        .next()
+        .unwrap_or("unknown")
+        .trim_start_matches("www.")
+        .to_lowercase()
+}
+
+pub fn encode_cursor(offset: u64) -> String {
+    format!("v1:{offset}")
+}
+
+pub fn decode_cursor(cursor: &str) -> Result<u64, String> {
+    let offset = cursor
+        .strip_prefix("v1:")
+        .ok_or_else(|| "cursor is not an Aurora search cursor".to_string())?
+        .parse::<u64>()
+        .map_err(|_| "cursor contains an invalid offset".to_string())?;
+    if offset > i64::MAX as u64 {
+        return Err("cursor offset is too large".to_string());
+    }
+    Ok(offset)
 }
 
 fn query_terms(query: &str) -> Vec<String> {
@@ -203,13 +350,29 @@ fn truncate_chars(content: &str, max_chars: usize) -> (String, bool) {
 
 #[cfg(test)]
 mod tests {
-    use super::query_terms;
+    use super::{decode_cursor, encode_cursor, platform_from_url, query_terms};
 
     #[test]
     fn query_terms_support_ascii_and_cjk_queries() {
         assert_eq!(
             query_terms("payments + AI，招聘"),
             vec!["payments", "ai", "招聘"]
+        );
+    }
+
+    #[test]
+    fn cursor_round_trips_and_rejects_unrelated_values() {
+        assert_eq!(decode_cursor(&encode_cursor(42)).unwrap(), 42);
+        assert!(decode_cursor("42").is_err());
+        assert!(decode_cursor("v2:42").is_err());
+    }
+
+    #[test]
+    fn original_source_platform_is_derived_from_its_url() {
+        assert_eq!(platform_from_url("https://www.x.com/example/1"), "x.com");
+        assert_eq!(
+            platform_from_url("https://jobs.example.com/1"),
+            "jobs.example.com"
         );
     }
 }

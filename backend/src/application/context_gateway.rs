@@ -70,13 +70,25 @@ impl ContextGateway {
         self.search_personal_context_with_audit(query, purpose, max_items, true)
     }
 
-    pub(crate) fn search_personal_context_unlogged(
+    pub(crate) fn search_personal_context_exact_unlogged(
         &self,
         query: &str,
         purpose: &str,
         max_items: Option<usize>,
     ) -> Result<ContextPack, String> {
-        self.search_personal_context_with_audit(query, purpose, max_items, false)
+        let query = required_text(query, "query")?;
+        let purpose = required_text(purpose, "purpose")?;
+        let context = local_context::load(&self.config)?;
+        let mut documents = matching_documents(&context, query);
+        let limit = max_items
+            .unwrap_or(DEFAULT_SEARCH_LIMIT)
+            .clamp(1, MAX_SEARCH_LIMIT);
+        documents.truncate(limit);
+        let selected = documents
+            .into_iter()
+            .map(|candidate| (candidate.category, candidate.document))
+            .collect();
+        self.build_pack(None, purpose, Some(query), &context, selected)
     }
 
     fn search_personal_context_with_audit(
@@ -222,6 +234,26 @@ fn scored_documents<'a>(
             candidates.push(candidate);
         }
     }
+    candidates.sort_by(|left, right| right.score.cmp(&left.score));
+    candidates
+}
+
+fn matching_documents<'a>(context: &'a LocalContext, query: &str) -> Vec<ScoredDocument<'a>> {
+    let terms = search_terms(query);
+    let mut candidates = Vec::new();
+    if let Some(document) = &context.identity_card {
+        candidates.push(scored("identity", document, 0, &terms));
+    }
+    if let Some(document) = &context.current_focus {
+        candidates.push(scored("current_focus", document, 0, &terms));
+    }
+    if let Some(document) = &context.preferences {
+        candidates.push(scored("preferences", document, 0, &terms));
+    }
+    for document in &context.project_contexts {
+        candidates.push(scored("project_context", document, 0, &terms));
+    }
+    candidates.retain(|candidate| candidate.score > 0);
     candidates.sort_by(|left, right| right.score.cmp(&left.score));
     candidates
 }
