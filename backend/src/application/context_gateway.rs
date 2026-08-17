@@ -91,6 +91,36 @@ impl ContextGateway {
         self.build_pack(None, purpose, Some(query), &context, selected)
     }
 
+    pub(crate) fn all_personal_context_unlogged(
+        &self,
+        purpose: &str,
+        max_items: Option<usize>,
+    ) -> Result<ContextPack, String> {
+        let purpose = required_text(purpose, "purpose")?;
+        let context = local_context::load(&self.config)?;
+        let mut selected = Vec::new();
+        if let Some(document) = &context.identity_card {
+            selected.push(("identity", document));
+        }
+        if let Some(document) = &context.current_focus {
+            selected.push(("current_focus", document));
+        }
+        if let Some(document) = &context.preferences {
+            selected.push(("preferences", document));
+        }
+        selected.extend(
+            context
+                .project_contexts
+                .iter()
+                .map(|document| ("project_context", document)),
+        );
+        let limit = max_items
+            .unwrap_or(DEFAULT_SEARCH_LIMIT)
+            .clamp(1, MAX_SEARCH_LIMIT);
+        selected.truncate(limit);
+        self.build_pack(None, purpose, None, &context, selected)
+    }
+
     fn search_personal_context_with_audit(
         &self,
         query: &str,

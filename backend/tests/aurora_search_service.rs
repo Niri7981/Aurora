@@ -7,6 +7,7 @@ use aurora::application::aurora_search_service::{AuroraSearchService, SearchAuro
 use aurora::application::context_gateway::ContextGateway;
 use aurora::application::telegram_message_service::{SaveTelegramMessage, TelegramMessageService};
 use aurora::config::AppConfig;
+use aurora::domain::search::SearchMatchMode;
 use aurora::infrastructure::audit_log::AuditLog;
 use sqlx::postgres::PgPoolOptions;
 
@@ -102,8 +103,9 @@ async fn globally_searches_personal_context_and_telegram_with_server_sources() {
         .search(
             &mut transaction,
             SearchAurora {
-                query: "Aurora Rust",
+                query: Some("Aurora Rust"),
                 purpose: "find relevant authorized context",
+                match_mode: SearchMatchMode::AllTerms,
                 include_personal_context: true,
                 include_telegram: true,
                 channel_name: None,
@@ -152,8 +154,9 @@ async fn globally_searches_personal_context_and_telegram_with_server_sources() {
         .search(
             &mut transaction,
             SearchAurora {
-                query: "Aurora Rust",
+                query: Some("Aurora Rust"),
                 purpose: "continue the authorized search",
+                match_mode: SearchMatchMode::AllTerms,
                 include_personal_context: true,
                 include_telegram: true,
                 channel_name: None,
@@ -175,8 +178,9 @@ async fn globally_searches_personal_context_and_telegram_with_server_sources() {
         .search(
             &mut transaction,
             SearchAurora {
-                query: "Aurora Rust",
+                query: Some("Aurora Rust"),
                 purpose: "count authorized matches",
+                match_mode: SearchMatchMode::AllTerms,
                 include_personal_context: true,
                 include_telegram: true,
                 channel_name: None,
@@ -192,6 +196,31 @@ async fn globally_searches_personal_context_and_telegram_with_server_sources() {
     assert_eq!(count_only.counts.total_matches, 3);
     assert_eq!(count_only.page.returned_count, 0);
     assert!(count_only.items.is_empty());
+
+    let inventory_count = service
+        .search(
+            &mut transaction,
+            SearchAurora {
+                query: None,
+                purpose: "count every stored Telegram message",
+                match_mode: SearchMatchMode::AllTerms,
+                include_personal_context: false,
+                include_telegram: true,
+                channel_name: None,
+                starts_at: None,
+                ends_at: None,
+                offset: 0,
+                page_size: 10,
+                count_only: true,
+            },
+        )
+        .await
+        .expect("inventory count should succeed without invented keywords");
+    assert_eq!(inventory_count.query, None);
+    assert_eq!(inventory_count.query_mode, "match_all");
+    assert_eq!(inventory_count.counts.telegram, 2);
+    assert_eq!(inventory_count.counts.total_matches, 2);
+    assert!(inventory_count.items.is_empty());
     assert!(
         !serde_json::to_string(&pack)
             .unwrap()

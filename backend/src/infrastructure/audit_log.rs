@@ -52,7 +52,7 @@ impl AuditLog {
         client: &'a str,
         tool: &'a str,
         purpose: &'a str,
-        query: &'a str,
+        query: Option<&'a str>,
         returned_sources: &[&'a str],
         omitted_lines: usize,
     ) -> Result<(), String> {
@@ -142,7 +142,7 @@ impl<'a> AuditEvent<'a> {
         client: &'a str,
         tool: &'a str,
         purpose: &'a str,
-        query: &'a str,
+        query: Option<&'a str>,
         returned_sources: &[&'a str],
         omitted_lines: usize,
     ) -> Self {
@@ -151,7 +151,7 @@ impl<'a> AuditEvent<'a> {
             client,
             tool,
             purpose,
-            query: Some(query),
+            query,
             status: "succeeded",
             returned_sources: returned_sources.to_vec(),
             omitted_lines,

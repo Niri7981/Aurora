@@ -14,6 +14,7 @@ use crate::application::profile_update_proposal_service::{
 use crate::application::telegram_message_service::{SaveTelegramMessage, TelegramMessageService};
 use crate::domain::context_pack::ContextPack;
 use crate::domain::profile_update_proposal::{ProfileUpdateProposal, ProfileUpdateTarget};
+use crate::domain::search::SearchMatchMode;
 use crate::domain::telegram_message::ContentUrl;
 use crate::infrastructure::database::telegram_message_repository::SaveTelegramMessageOutcome;
 use chrono::{DateTime, Utc};
@@ -38,8 +39,12 @@ struct SearchRequest {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct GlobalSearchRequest {
-    /// What to find across Aurora's authorized information.
-    query: String,
+    /// What to find across Aurora's authorized information. Omit to match every record in the
+    /// selected sources; do not invent broad keywords for total-count questions.
+    query: Option<String>,
+    /// How multiple query terms are combined. Defaults to all_terms. AND and OR written inside
+    /// query are ignored; choose all_terms or any_terms here instead.
+    match_mode: Option<SearchMatchMode>,
     /// Why the Agent needs these results for the current user request.
     purpose: String,
     /// Optional source filters: personal_context and/or telegram. Omit to search both.
@@ -258,7 +263,7 @@ impl AuroraMcpServer {
     }
 
     #[tool(
-        description = "Search authorized Aurora information with exact match counts, cursor pagination, and structured provenance. Use count_only=true for total-count questions. A page's returned_count is never the total; read counts.total_matches. Each result separates its Aurora record URI, collection source (such as a Telegram channel), and linked original source. Never searches privacy rules, profile proposals, hashes, or internal database fields.",
+        description = "Search authorized Aurora information with exact counts, cursor pagination, explicit all_terms/any_terms matching, and structured provenance. Omit query to match all records in selected sources; for total inventory questions, omit query and use count_only=true instead of inventing broad keywords. AND/OR text inside query is ignored. A page's returned_count is never the total; read counts.total_matches. Never searches privacy rules, profile proposals, hashes, or internal database fields.",
         annotations(
             title = "Search Aurora",
             read_only_hint = true,
@@ -271,8 +276,10 @@ impl AuroraMcpServer {
         &self,
         Parameters(request): Parameters<GlobalSearchRequest>,
     ) -> Result<Json<AuroraSearchResponse>, McpError> {
-        validate_mcp_text(&request.query, "query")?;
+        let query = normalize_optional_search_filter(request.query.as_deref());
+        validate_optional_mcp_bounded_text(query, "query", 5_000)?;
         validate_mcp_text(&request.purpose, "purpose")?;
+        let match_mode = request.match_mode.unwrap_or(SearchMatchMode::AllTerms);
         let channel_name = normalize_optional_search_filter(request.channel_name.as_deref());
         validate_optional_mcp_bounded_text(channel_name, "channel_name", 500)?;
         let (include_personal_context, include_telegram) =
@@ -323,8 +330,9 @@ impl AuroraMcpServer {
             .search(
                 &mut connection,
                 SearchAurora {
-                    query: &request.query,
+                    query,
                     purpose: &request.purpose,
+                    match_mode,
                     include_personal_context,
                     include_telegram,
                     channel_name,
@@ -620,7 +628,7 @@ impl AuroraMcpServer {
 #[tool_handler(
     name = "aurora",
     version = "0.1.0",
-    instructions = "Aurora is the user's local identity and context authority. Read only the minimum context needed. For search totals, call search_aurora with count_only=true and report counts.total_matches; never treat page.returned_count as the total. When page.has_more is true, pass page.next_cursor unchanged to continue the same search. Keep stored_record_uri, collection_source, and original_source distinct when citing results. Save a Telegram message only after the user explicitly asks to store that single forwarded message; Telegram source material is kept separate from profile documents. Agents may create, review, apply, and delete pending profile update proposals. Applying writes the proposal's exact content, checks the original file version, and cannot modify privacy rules. Applied and stale records cannot be deleted."
+    instructions = "Aurora is the user's local identity and context authority. Read only the minimum context needed. For total inventory questions, call search_aurora with query omitted and count_only=true; never invent broad keywords and never treat page.returned_count as the total. For keyword searches, select all_terms or any_terms explicitly; do not write AND/OR inside query. When page.has_more is true, pass page.next_cursor unchanged to continue the same search. Keep stored_record_uri, collection_source, and original_source distinct when citing results. Save a Telegram message only after the user explicitly asks to store that single forwarded message; Telegram source material is kept separate from profile documents. Agents may create, review, apply, and delete pending profile update proposals. Applying writes the proposal's exact content, checks the original file version, and cannot modify privacy rules. Applied and stale records cannot be deleted."
 )]
 impl ServerHandler for AuroraMcpServer {}
 
@@ -863,9 +871,12 @@ mod tests {
             .expect("global search tool should be registered");
         let schema = serde_json::to_string(&tool.input_schema)
             .expect("global search input schema should serialize");
+        let schema_value = serde_json::to_value(&tool.input_schema)
+            .expect("global search input schema should convert to JSON");
 
         for field in [
             "query",
+            "match_mode",
             "purpose",
             "source_types",
             "channel_name",
@@ -880,6 +891,14 @@ mod tests {
         assert!(!schema.contains("sql"));
         assert!(!schema.contains("privacy_rules"));
         assert!(!schema.contains("max_results"));
+        assert!(schema.contains("all_terms"));
+        assert!(schema.contains("any_terms"));
+        let required = schema_value
+            .get("required")
+            .and_then(serde_json::Value::as_array)
+            .expect("global search schema should list required fields");
+        assert!(required.iter().any(|field| field == "purpose"));
+        assert!(!required.iter().any(|field| field == "query"));
 
         let annotations = tool
             .annotations

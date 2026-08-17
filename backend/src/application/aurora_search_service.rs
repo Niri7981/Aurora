@@ -7,6 +7,7 @@ use sqlx::PgConnection;
 
 use crate::application::context_gateway::ContextGateway;
 use crate::domain::context_pack::{ContextItem, ContextOmission, ContextPack};
+use crate::domain::search::SearchMatchMode;
 use crate::domain::telegram_message::{ContentUrl, TelegramMessage};
 use crate::infrastructure::audit_log::AuditLog;
 use crate::infrastructure::database::telegram_message_repository::{
@@ -19,8 +20,9 @@ const MAX_QUERY_TERMS: usize = 12;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SearchAurora<'a> {
-    pub query: &'a str,
+    pub query: Option<&'a str>,
     pub purpose: &'a str,
+    pub match_mode: SearchMatchMode,
     pub include_personal_context: bool,
     pub include_telegram: bool,
     pub channel_name: Option<&'a str>,
@@ -34,7 +36,8 @@ pub struct SearchAurora<'a> {
 #[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct AuroraSearchResponse {
     pub purpose: String,
-    pub query: String,
+    pub query: Option<String>,
+    pub query_mode: String,
     pub client: String,
     pub access: String,
     pub match_semantics: String,
@@ -129,7 +132,7 @@ impl AuroraSearchService {
                     &self.client,
                     "search_aurora",
                     &response.purpose,
-                    &response.query,
+                    response.query.as_deref(),
                     &returned_sources,
                     omitted_lines,
                 )?;
@@ -140,7 +143,7 @@ impl AuroraSearchService {
                     &self.client,
                     "search_aurora",
                     request.purpose,
-                    Some(request.query),
+                    request.query,
                     &error,
                 )?;
                 Err(error)
@@ -154,16 +157,21 @@ impl AuroraSearchService {
         request: SearchAurora<'_>,
     ) -> Result<AuroraSearchResponse, String> {
         let mut personal_pack = if request.include_personal_context {
-            self.context_gateway
-                .search_personal_context_exact_unlogged(
-                    request.query,
-                    request.purpose,
-                    Some(MAX_PERSONAL_ITEMS),
-                )?
+            if let Some(query) = request.query {
+                self.context_gateway
+                    .search_personal_context_exact_unlogged(
+                        query,
+                        request.purpose,
+                        Some(MAX_PERSONAL_ITEMS),
+                    )?
+            } else {
+                self.context_gateway
+                    .all_personal_context_unlogged(request.purpose, Some(MAX_PERSONAL_ITEMS))?
+            }
         } else {
             ContextPack {
                 purpose: request.purpose.to_string(),
-                query: Some(request.query.to_string()),
+                query: request.query.map(str::to_string),
                 client: self.client.clone(),
                 access: "read-only".to_string(),
                 items: Vec::new(),
@@ -172,9 +180,14 @@ impl AuroraSearchService {
         };
         let personal_count = personal_pack.items.len() as u64;
 
-        let terms = query_terms(request.query);
+        let terms = request.query.map(query_terms).unwrap_or_default();
+        if request.query.is_some() && terms.is_empty() {
+            return Err("query must contain at least one searchable term".to_string());
+        }
         let telegram_search = SearchTelegramMessages {
             terms: &terms,
+            match_all: request.query.is_none(),
+            match_mode: request.match_mode,
             channel_name: request.channel_name,
             starts_at: request.starts_at,
             ends_at: request.ends_at,
@@ -228,11 +241,21 @@ impl AuroraSearchService {
 
         Ok(AuroraSearchResponse {
             purpose: request.purpose.to_string(),
-            query: request.query.to_string(),
+            query: request.query.map(str::to_string),
+            query_mode: if request.query.is_none() {
+                "match_all".to_string()
+            } else {
+                request.match_mode.as_str().to_string()
+            },
             client: self.client.clone(),
             access: "read-only, source-attributed, paginated disclosure".to_string(),
-            match_semantics: "case-insensitive substring; multiple query terms match any term"
-                .to_string(),
+            match_semantics: match request.query {
+                None => "all records in selected sources after structured filters".to_string(),
+                Some(_) => match request.match_mode {
+                    SearchMatchMode::AllTerms => "case-insensitive substring; every query term must match message content or URLs; AND/OR tokens are ignored".to_string(),
+                    SearchMatchMode::AnyTerms => "case-insensitive substring; any query term may match message content or URLs; AND/OR tokens are ignored".to_string(),
+                },
+            },
             counts: SearchCounts {
                 total_matches,
                 personal_context: personal_count,
@@ -331,6 +354,9 @@ fn query_terms(query: &str) -> Vec<String> {
             || matches!(character, '\u{3400}'..='\u{4dbf}' | '\u{4e00}'..='\u{9fff}'))
     }) {
         let term = term.trim().to_lowercase();
+        if matches!(term.as_str(), "and" | "or") {
+            continue;
+        }
         if term.chars().count() >= 2 && seen.insert(term.clone()) {
             terms.push(term);
             if terms.len() == MAX_QUERY_TERMS {
@@ -355,8 +381,8 @@ mod tests {
     #[test]
     fn query_terms_support_ascii_and_cjk_queries() {
         assert_eq!(
-            query_terms("payments + AI，招聘"),
-            vec!["payments", "ai", "招聘"]
+            query_terms("招聘 OR 求职 AND payments + AI"),
+            vec!["招聘", "求职", "payments", "ai"]
         );
     }
 

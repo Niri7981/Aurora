@@ -1,4 +1,5 @@
 use aurora::application::telegram_message_service::{SaveTelegramMessage, TelegramMessageService};
+use aurora::domain::search::SearchMatchMode;
 use aurora::domain::telegram_message::ContentUrl;
 use aurora::infrastructure::database::telegram_message_repository::SaveTelegramMessageOutcome;
 use aurora::infrastructure::database::telegram_message_repository::{
@@ -72,6 +73,25 @@ async fn saves_one_telegram_message_without_duplicating_its_source() {
             .any(|content_url| content_url.url == "https://example.com/jobs/rust")
     );
 
+    let second_urls = [ContentUrl {
+        url: "https://example.com/jobs/python".to_string(),
+        kind: Some("job_application".to_string()),
+    }];
+    TelegramMessageService::save(
+        &mut transaction,
+        SaveTelegramMessage {
+            channel_name: "Example jobs",
+            content_text: "A fictional company is hiring a Python engineer.",
+            author_name: Some("Example recruiter"),
+            published_at: Some(timestamp("2026-08-08T23:27:00+08:00")),
+            external_message_id: Some("43"),
+            external_url: Some("https://t.me/example_jobs/43"),
+            content_urls: &second_urls,
+        },
+    )
+    .await
+    .expect("second message should be saved");
+
     let count: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM telegram_messages WHERE external_url = $1")
             .bind("https://t.me/example_jobs/42")
@@ -80,11 +100,65 @@ async fn saves_one_telegram_message_without_duplicating_its_source() {
             .expect("saved message count should be readable");
     assert_eq!(count, 1);
 
+    let multi_terms = vec!["rust".to_string(), "engineer".to_string()];
+    let all_terms_count = TelegramMessageRepository::count(
+        &mut transaction,
+        &SearchTelegramMessages {
+            terms: &multi_terms,
+            match_all: false,
+            match_mode: SearchMatchMode::AllTerms,
+            channel_name: Some("Example jobs"),
+            starts_at: None,
+            ends_at: None,
+            offset: 0,
+            limit: 10,
+        },
+    )
+    .await
+    .expect("all-terms count should succeed");
+    assert_eq!(all_terms_count, 1);
+
+    let any_terms_count = TelegramMessageRepository::count(
+        &mut transaction,
+        &SearchTelegramMessages {
+            terms: &multi_terms,
+            match_all: false,
+            match_mode: SearchMatchMode::AnyTerms,
+            channel_name: Some("Example jobs"),
+            starts_at: None,
+            ends_at: None,
+            offset: 0,
+            limit: 10,
+        },
+    )
+    .await
+    .expect("any-terms count should succeed");
+    assert_eq!(any_terms_count, 2);
+
+    let match_all_count = TelegramMessageRepository::count(
+        &mut transaction,
+        &SearchTelegramMessages {
+            terms: &[],
+            match_all: true,
+            match_mode: SearchMatchMode::AllTerms,
+            channel_name: Some("Example jobs"),
+            starts_at: None,
+            ends_at: None,
+            offset: 0,
+            limit: 10,
+        },
+    )
+    .await
+    .expect("match-all count should succeed");
+    assert_eq!(match_all_count, 2);
+
     let terms = vec!["rust".to_string()];
     let found = TelegramMessageRepository::search(
         &mut transaction,
         SearchTelegramMessages {
             terms: &terms,
+            match_all: false,
+            match_mode: SearchMatchMode::AllTerms,
             channel_name: Some("Example jobs"),
             starts_at: Some(timestamp("2026-08-01T00:00:00Z")),
             ends_at: Some(timestamp("2026-09-01T00:00:00Z")),
@@ -100,6 +174,8 @@ async fn saves_one_telegram_message_without_duplicating_its_source() {
         &mut transaction,
         &SearchTelegramMessages {
             terms: &terms,
+            match_all: false,
+            match_mode: SearchMatchMode::AllTerms,
             channel_name: Some("Example jobs"),
             starts_at: Some(timestamp("2026-08-01T00:00:00Z")),
             ends_at: Some(timestamp("2026-09-01T00:00:00Z")),
@@ -115,6 +191,8 @@ async fn saves_one_telegram_message_without_duplicating_its_source() {
         &mut transaction,
         SearchTelegramMessages {
             terms: &terms,
+            match_all: false,
+            match_mode: SearchMatchMode::AllTerms,
             channel_name: Some("Example jobs"),
             starts_at: None,
             ends_at: None,
@@ -131,6 +209,8 @@ async fn saves_one_telegram_message_without_duplicating_its_source() {
         &mut transaction,
         SearchTelegramMessages {
             terms: &url_terms,
+            match_all: false,
+            match_mode: SearchMatchMode::AllTerms,
             channel_name: None,
             starts_at: None,
             ends_at: None,
@@ -143,11 +223,13 @@ async fn saves_one_telegram_message_without_duplicating_its_source() {
     assert_eq!(found_by_url.len(), 1);
     assert_eq!(found_by_url[0].id, created.id);
 
-    let missing_terms = vec!["python".to_string()];
+    let missing_terms = vec!["golang".to_string()];
     let missing = TelegramMessageRepository::search(
         &mut transaction,
         SearchTelegramMessages {
             terms: &missing_terms,
+            match_all: false,
+            match_mode: SearchMatchMode::AllTerms,
             channel_name: Some("Example jobs"),
             starts_at: None,
             ends_at: None,

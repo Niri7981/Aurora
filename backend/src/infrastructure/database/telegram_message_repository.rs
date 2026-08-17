@@ -1,3 +1,4 @@
+use crate::domain::search::SearchMatchMode;
 use crate::domain::telegram_message::{ContentUrl, TelegramMessage};
 use chrono::{DateTime, Utc};
 use sqlx::{PgConnection, Postgres, QueryBuilder, types::Json};
@@ -26,6 +27,8 @@ pub struct TelegramMessageRepository;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchTelegramMessages<'a> {
     pub terms: &'a [String],
+    pub match_all: bool,
+    pub match_mode: SearchMatchMode,
     pub channel_name: Option<&'a str>,
     pub starts_at: Option<DateTime<Utc>>,
     pub ends_at: Option<DateTime<Utc>>,
@@ -38,7 +41,7 @@ impl TelegramMessageRepository {
         connection: &mut PgConnection,
         search: &SearchTelegramMessages<'_>,
     ) -> Result<u64, sqlx::Error> {
-        if search.terms.is_empty() {
+        if search.terms.is_empty() && !search.match_all {
             return Ok(0);
         }
 
@@ -46,11 +49,14 @@ impl TelegramMessageRepository {
             r#"
             SELECT COUNT(*)
             FROM telegram_messages
-            WHERE (
+            WHERE TRUE
             "#,
         );
-        push_term_predicates(&mut query, search.terms);
-        query.push(")");
+        if !search.match_all {
+            query.push(" AND (");
+            push_term_predicates(&mut query, search.terms, search.match_mode);
+            query.push(")");
+        }
         push_filters(&mut query, search);
 
         let count: i64 = query.build_query_scalar().fetch_one(connection).await?;
@@ -61,7 +67,7 @@ impl TelegramMessageRepository {
         connection: &mut PgConnection,
         search: SearchTelegramMessages<'_>,
     ) -> Result<Vec<TelegramMessage>, sqlx::Error> {
-        if search.terms.is_empty() || search.limit == 0 {
+        if (search.terms.is_empty() && !search.match_all) || search.limit == 0 {
             return Ok(Vec::new());
         }
 
@@ -79,11 +85,14 @@ impl TelegramMessageRepository {
                 dedup_sha256,
                 saved_at
             FROM telegram_messages
-            WHERE (
+            WHERE TRUE
             "#,
         );
-        push_term_predicates(&mut query, search.terms);
-        query.push(")");
+        if !search.match_all {
+            query.push(" AND (");
+            push_term_predicates(&mut query, search.terms, search.match_mode);
+            query.push(")");
+        }
         push_filters(&mut query, &search);
         query
             .push(" ORDER BY published_at DESC NULLS LAST, saved_at DESC, id DESC OFFSET ")
@@ -178,10 +187,17 @@ impl TelegramMessageRepository {
     }
 }
 
-fn push_term_predicates<'a>(query: &mut QueryBuilder<'a, Postgres>, terms: &'a [String]) {
+fn push_term_predicates<'a>(
+    query: &mut QueryBuilder<'a, Postgres>,
+    terms: &'a [String],
+    match_mode: SearchMatchMode,
+) {
     for (index, term) in terms.iter().enumerate() {
         if index > 0 {
-            query.push(" OR ");
+            query.push(match match_mode {
+                SearchMatchMode::AllTerms => " AND ",
+                SearchMatchMode::AnyTerms => " OR ",
+            });
         }
         let pattern = format!("%{}%", term.to_lowercase());
         query
