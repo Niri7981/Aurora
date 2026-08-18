@@ -5,7 +5,8 @@ use rmcp::{
 use serde::{Deserialize, Serialize};
 
 use crate::application::aurora_search_service::{
-    AuroraSearchResponse, AuroraSearchService, SearchAurora, decode_cursor,
+    AuroraInventoryResponse, AuroraSearchResponse, AuroraSearchService, GetAuroraInventory,
+    SearchAurora, decode_cursor,
 };
 use crate::application::context_gateway::ContextGateway;
 use crate::application::profile_update_proposal_service::{
@@ -39,9 +40,9 @@ struct SearchRequest {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct GlobalSearchRequest {
-    /// What to find across Aurora's authorized information. Omit to match every record in the
-    /// selected sources; do not invent broad keywords for total-count questions.
-    query: Option<String>,
+    /// What to find across Aurora's authorized information. For total stored-record counts, use
+    /// get_aurora_inventory instead.
+    query: String,
     /// How multiple query terms are combined. Defaults to all_terms. AND and OR written inside
     /// query are ignored; choose all_terms or any_terms here instead.
     match_mode: Option<SearchMatchMode>,
@@ -61,6 +62,20 @@ struct GlobalSearchRequest {
     cursor: Option<String>,
     /// Return exact match counts without result bodies. Use for "how many" questions.
     count_only: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct InventoryRequest {
+    /// Why the Agent needs the stored-record counts for the current user request.
+    purpose: String,
+    /// Optional source filters: personal_context and/or telegram. Omit to count both.
+    source_types: Option<Vec<String>>,
+    /// Optional exact Telegram channel name filter.
+    channel_name: Option<String>,
+    /// Optional inclusive lower publication-time bound as RFC 3339.
+    from: Option<String>,
+    /// Optional exclusive upper publication-time bound as RFC 3339.
+    to: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -263,7 +278,64 @@ impl AuroraMcpServer {
     }
 
     #[tool(
-        description = "Search authorized Aurora information with exact counts, cursor pagination, explicit all_terms/any_terms matching, and structured provenance. Omit query to match all records in selected sources; for total inventory questions, omit query and use count_only=true instead of inventing broad keywords. AND/OR text inside query is ignored. A page's returned_count is never the total; read counts.total_matches. Never searches privacy rules, profile proposals, hashes, or internal database fields.",
+        description = "Return exact counts of records stored in authorized Aurora sources without searching for keywords or disclosing record contents. Use this for inventory questions such as how many Telegram messages Aurora contains. This tool intentionally has no query parameter.",
+        annotations(
+            title = "Get Aurora inventory counts",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn get_aurora_inventory(
+        &self,
+        Parameters(request): Parameters<InventoryRequest>,
+    ) -> Result<Json<AuroraInventoryResponse>, McpError> {
+        validate_mcp_text(&request.purpose, "purpose")?;
+        let channel_name = normalize_optional_search_filter(request.channel_name.as_deref());
+        validate_optional_mcp_bounded_text(channel_name, "channel_name", 500)?;
+        let (include_personal_context, include_telegram) =
+            parse_search_source_types(request.source_types.as_deref())?;
+        let starts_at = parse_optional_rfc3339(request.from.as_deref(), "from")?;
+        let ends_at = parse_optional_rfc3339(request.to.as_deref(), "to")?;
+        if let (Some(starts_at), Some(ends_at)) = (starts_at, ends_at)
+            && starts_at >= ends_at
+        {
+            return Err(McpError::invalid_params(
+                "from must be earlier than to",
+                None,
+            ));
+        }
+        if !include_telegram && (channel_name.is_some() || starts_at.is_some() || ends_at.is_some())
+        {
+            return Err(McpError::invalid_params(
+                "channel_name, from, and to require telegram in source_types",
+                None,
+            ));
+        }
+        let mut connection = self.pool.acquire().await.map_err(|error| {
+            internal_mcp_error(format!("failed to acquire PostgreSQL connection: {error}"))
+        })?;
+
+        self.search_service
+            .inventory(
+                &mut connection,
+                GetAuroraInventory {
+                    purpose: &request.purpose,
+                    include_personal_context,
+                    include_telegram,
+                    channel_name,
+                    starts_at,
+                    ends_at,
+                },
+            )
+            .await
+            .map(Json)
+            .map_err(internal_mcp_error)
+    }
+
+    #[tool(
+        description = "Search authorized Aurora information for a required keyword query, with exact match counts, cursor pagination, explicit all_terms/any_terms matching, and structured provenance. For total stored-record counts without keyword matching, use get_aurora_inventory instead. AND/OR text inside query is ignored. A page's returned_count is never the total; read counts.total_matches. Never searches privacy rules, profile proposals, hashes, or internal database fields.",
         annotations(
             title = "Search Aurora",
             read_only_hint = true,
@@ -276,8 +348,8 @@ impl AuroraMcpServer {
         &self,
         Parameters(request): Parameters<GlobalSearchRequest>,
     ) -> Result<Json<AuroraSearchResponse>, McpError> {
-        let query = normalize_optional_search_filter(request.query.as_deref());
-        validate_optional_mcp_bounded_text(query, "query", 5_000)?;
+        validate_mcp_bounded_text(&request.query, "query", 5_000)?;
+        let query = Some(request.query.trim());
         validate_mcp_text(&request.purpose, "purpose")?;
         let match_mode = request.match_mode.unwrap_or(SearchMatchMode::AllTerms);
         let channel_name = normalize_optional_search_filter(request.channel_name.as_deref());
@@ -628,7 +700,7 @@ impl AuroraMcpServer {
 #[tool_handler(
     name = "aurora",
     version = "0.1.0",
-    instructions = "Aurora is the user's local identity and context authority. Read only the minimum context needed. For total inventory questions, call search_aurora with query omitted and count_only=true; never invent broad keywords and never treat page.returned_count as the total. For keyword searches, select all_terms or any_terms explicitly; do not write AND/OR inside query. When page.has_more is true, pass page.next_cursor unchanged to continue the same search. Keep stored_record_uri, collection_source, and original_source distinct when citing results. Save a Telegram message only after the user explicitly asks to store that single forwarded message; Telegram source material is kept separate from profile documents. Agents may create, review, apply, and delete pending profile update proposals. Applying writes the proposal's exact content, checks the original file version, and cannot modify privacy rules. Applied and stale records cannot be deleted."
+    instructions = "Aurora is the user's local identity and context authority. Read only the minimum context needed. For total inventory questions, always call get_aurora_inventory; it returns exact stored-record counts without keyword matching or content disclosure. Use search_aurora only when the user asks to find records matching actual terms, and never invent broad keywords. For keyword searches, select all_terms or any_terms explicitly; do not write AND/OR inside query and never treat page.returned_count as the total. When page.has_more is true, pass page.next_cursor unchanged to continue the same search. Keep stored_record_uri, collection_source, and original_source distinct when citing results. Save a Telegram message only after the user explicitly asks to store that single forwarded message; Telegram source material is kept separate from profile documents. Agents may create, review, apply, and delete pending profile update proposals. Applying writes the proposal's exact content, checks the original file version, and cannot modify privacy rules. Applied and stale records cannot be deleted."
 )]
 impl ServerHandler for AuroraMcpServer {}
 
@@ -898,12 +970,39 @@ mod tests {
             .and_then(serde_json::Value::as_array)
             .expect("global search schema should list required fields");
         assert!(required.iter().any(|field| field == "purpose"));
-        assert!(!required.iter().any(|field| field == "query"));
+        assert!(required.iter().any(|field| field == "query"));
 
         let annotations = tool
             .annotations
             .as_ref()
             .expect("global search tool should declare annotations");
+        assert_eq!(annotations.read_only_hint, Some(true));
+        assert_eq!(annotations.destructive_hint, Some(false));
+        assert_eq!(annotations.idempotent_hint, Some(true));
+        assert_eq!(annotations.open_world_hint, Some(false));
+    }
+
+    #[test]
+    fn inventory_tool_cannot_accept_a_keyword_query() {
+        let tools = AuroraMcpServer::tool_router().list_all();
+        let tool = tools
+            .iter()
+            .find(|tool| tool.name == "get_aurora_inventory")
+            .expect("global inventory tool should be registered");
+        let schema = serde_json::to_string(&tool.input_schema)
+            .expect("global inventory input schema should serialize");
+
+        assert!(schema.contains("purpose"));
+        assert!(schema.contains("source_types"));
+        assert!(!schema.contains("query"));
+        assert!(!schema.contains("match_mode"));
+        assert!(!schema.contains("page_size"));
+        assert!(!schema.contains("cursor"));
+
+        let annotations = tool
+            .annotations
+            .as_ref()
+            .expect("inventory tool should declare annotations");
         assert_eq!(annotations.read_only_hint, Some(true));
         assert_eq!(annotations.destructive_hint, Some(false));
         assert_eq!(annotations.idempotent_hint, Some(true));

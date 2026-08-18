@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use aurora::application::aurora_search_service::{AuroraSearchService, SearchAurora};
+use aurora::application::aurora_search_service::{
+    AuroraSearchService, GetAuroraInventory, SearchAurora,
+};
 use aurora::application::context_gateway::ContextGateway;
 use aurora::application::telegram_message_service::{SaveTelegramMessage, TelegramMessageService};
 use aurora::config::AppConfig;
@@ -198,29 +200,21 @@ async fn globally_searches_personal_context_and_telegram_with_server_sources() {
     assert!(count_only.items.is_empty());
 
     let inventory_count = service
-        .search(
+        .inventory(
             &mut transaction,
-            SearchAurora {
-                query: None,
+            GetAuroraInventory {
                 purpose: "count every stored Telegram message",
-                match_mode: SearchMatchMode::AllTerms,
                 include_personal_context: false,
                 include_telegram: true,
                 channel_name: None,
                 starts_at: None,
                 ends_at: None,
-                offset: 0,
-                page_size: 10,
-                count_only: true,
             },
         )
         .await
         .expect("inventory count should succeed without invented keywords");
-    assert_eq!(inventory_count.query, None);
-    assert_eq!(inventory_count.query_mode, "match_all");
     assert_eq!(inventory_count.counts.telegram, 2);
-    assert_eq!(inventory_count.counts.total_matches, 2);
-    assert!(inventory_count.items.is_empty());
+    assert_eq!(inventory_count.counts.total_records, 2);
     assert!(
         !serde_json::to_string(&pack)
             .unwrap()
@@ -229,6 +223,7 @@ async fn globally_searches_personal_context_and_telegram_with_server_sources() {
     let audit = fs::read_to_string(config.aurora_home.join("audit/mcp.jsonl"))
         .expect("global search should be audited");
     assert!(audit.contains("\"tool\":\"search_aurora\""));
+    assert!(audit.contains("\"tool\":\"get_aurora_inventory\""));
 
     transaction
         .rollback()

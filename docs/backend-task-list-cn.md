@@ -285,7 +285,8 @@ Telegram 消息属于外部来源资料，不属于用户的长期个人画像�
 - [x] 支持 `count_only`，只问数量时不披露消息正文
 - [x] 支持游标分页并返回 `has_more`、`next_cursor`
 - [x] 分离 Aurora 记录 URI、Telegram 收藏位置和外部原始来源
-- [x] 省略 `query` 时匹配所选来源的全部记录，不再编造宽泛关键词
+- [x] 新增无 `query` 参数的全局 `get_aurora_inventory`，准确统计授权来源库存
+- [x] `search_aurora` 的 `query` 改为必填，避免 Agent 把库存统计误变成关键词匹配
 - [x] 支持 `all_terms` 和 `any_terms`，默认使用更严格的 `all_terms`
 - [x] 忽略查询文本中的 AND/OR 运算词，避免 `or` 误命中英文正文
 - [x] 搜索行为写入披露审计；不暴露隐私规则、提案和内部版本字段

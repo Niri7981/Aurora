@@ -33,6 +33,31 @@ pub struct SearchAurora<'a> {
     pub count_only: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GetAuroraInventory<'a> {
+    pub purpose: &'a str,
+    pub include_personal_context: bool,
+    pub include_telegram: bool,
+    pub channel_name: Option<&'a str>,
+    pub starts_at: Option<DateTime<Utc>>,
+    pub ends_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct AuroraInventoryResponse {
+    pub purpose: String,
+    pub client: String,
+    pub access: String,
+    pub counts: InventoryCounts,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct InventoryCounts {
+    pub total_records: u64,
+    pub personal_context: u64,
+    pub telegram: u64,
+}
+
 #[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct AuroraSearchResponse {
     pub purpose: String,
@@ -144,6 +169,59 @@ impl AuroraSearchService {
                     "search_aurora",
                     request.purpose,
                     request.query,
+                    &error,
+                )?;
+                Err(error)
+            }
+        }
+    }
+
+    pub async fn inventory(
+        &self,
+        connection: &mut PgConnection,
+        request: GetAuroraInventory<'_>,
+    ) -> Result<AuroraInventoryResponse, String> {
+        let search_request = SearchAurora {
+            query: None,
+            purpose: request.purpose,
+            match_mode: SearchMatchMode::AllTerms,
+            include_personal_context: request.include_personal_context,
+            include_telegram: request.include_telegram,
+            channel_name: request.channel_name,
+            starts_at: request.starts_at,
+            ends_at: request.ends_at,
+            offset: 0,
+            page_size: 1,
+            count_only: true,
+        };
+        let result = self.search_inner(connection, search_request).await;
+        match result {
+            Ok(response) => {
+                self.audit_log.append_search_success(
+                    &self.client,
+                    "get_aurora_inventory",
+                    request.purpose,
+                    None,
+                    &[],
+                    0,
+                )?;
+                Ok(AuroraInventoryResponse {
+                    purpose: response.purpose,
+                    client: response.client,
+                    access: "read-only counts; no record contents disclosed".to_string(),
+                    counts: InventoryCounts {
+                        total_records: response.counts.total_matches,
+                        personal_context: response.counts.personal_context,
+                        telegram: response.counts.telegram,
+                    },
+                })
+            }
+            Err(error) => {
+                self.audit_log.append_failure(
+                    &self.client,
+                    "get_aurora_inventory",
+                    request.purpose,
+                    None,
                     &error,
                 )?;
                 Err(error)
